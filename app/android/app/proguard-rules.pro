@@ -8,3 +8,12 @@
 # Flutter embedding + our pose plugin are reached reflectively.
 -keep class io.flutter.** { *; }
 -keep class org.suraksha.surakshaar.** { *; }
+
+# Flutter's embedding references Play Core for deferred components and Play
+# Store split installs. SurakshaAR uses neither — the whole point is an APK that
+# is sideloaded onto a contract worker's phone and never talks to Play Services
+# or the network. The classes are genuinely absent, so R8 is told not to warn
+# rather than the Play Core dependency being added back in.
+-dontwarn com.google.android.play.core.**
+-dontwarn io.flutter.embedding.android.FlutterPlayStoreSplitApplication
+-dontwarn io.flutter.embedding.engine.deferredcomponents.**
