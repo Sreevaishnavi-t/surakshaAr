@@ -112,6 +112,8 @@ class _ArSessionScreenState extends State<ArSessionScreen>
     diagnostics.breadcrumb('ar.pose.stream.started');
     if (!mounted) return;
 
+    diagnostics.breadcrumb('ar.phase.calibrating');
+
     setState(() {
       if (_cameraController.failure == CameraFailure.permissionDenied) {
         _phase = _SessionPhase.needsCamera;

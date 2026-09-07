@@ -1,4 +1,4 @@
-import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -32,13 +32,6 @@ class Diagnostics {
   final List<String> _entries = <String>[];
   File? _file;
   bool _installed = false;
-
-  /// Serialises appends.
-  ///
-  /// Writes were previously fire-and-forget, so several could be in flight at
-  /// once and interleave, shredding the very log meant to explain a crash and
-  /// leaving half-lines behind. Each append now waits for the previous one.
-  Future<void> _writeQueue = Future<void>.value();
 
   List<String> get entries => List.unmodifiable(_entries);
 
@@ -118,27 +111,31 @@ class Diagnostics {
     }
 
     debugPrint('[diag] $line');
-    unawaited(_append(line, stackTrace));
+    _appendSync(line, stackTrace);
   }
 
-  Future<void> _append(String line, StackTrace? stackTrace) {
+  /// Writes synchronously, on purpose.
+  ///
+  /// Asynchronous appends made the trail a *lagging* indicator: several writes
+  /// could still be queued when the process died, so the last visible line sat
+  /// behind where execution actually reached — and a breadcrumb that points at
+  /// the wrong line is worse than none, because it sends you hunting in the
+  /// wrong place.
+  ///
+  /// Blocking I/O on the UI thread is normally indefensible. Here it is a few
+  /// hundred bytes appended a few dozen times per session, and it is the only
+  /// way to guarantee the trail is true at the instant of a native crash.
+  void _appendSync(String line, StackTrace? stackTrace) {
     final file = _file;
-    if (file == null) return Future<void>.value();
-    _writeQueue = _writeQueue.then((_) => _write(file, line, stackTrace));
-    return _writeQueue;
-  }
-
-  Future<void> _write(File file, String line, StackTrace? stackTrace) async {
+    if (file == null) return;
     try {
       final buffer = StringBuffer(line)..writeln();
       if (stackTrace != null) {
-        for (final frame in stackTrace.toString().split('\n').take(8)) {
-          buffer.writeln('    $frame');
+        for (final frame in _stackFrames(stackTrace)) {
+          buffer.writeln('    ' + frame);
         }
       }
-      // flush: true on every write. Slower, and the entire point — an unflushed
-      // breadcrumb does not survive the crash it was written to explain.
-      await file.writeAsString(
+      file.writeAsStringSync(
         buffer.toString(),
         mode: FileMode.append,
         flush: true,
@@ -147,6 +144,11 @@ class Diagnostics {
       // Logging must never throw into the caller.
     }
   }
+
+  /// First few stack frames: enough to locate a fault, short enough to read on
+  /// a phone screen.
+  static Iterable<String> _stackFrames(StackTrace stackTrace) =>
+      const LineSplitter().convert(stackTrace.toString()).take(8);
 
   /// Everything worth showing on the diagnostics screen, as copyable text.
   String asReport({Map<String, Object?> environment = const {}}) {

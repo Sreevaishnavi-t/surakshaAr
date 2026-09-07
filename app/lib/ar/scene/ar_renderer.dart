@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../core/diagnostics.dart';
 import 'ar_camera.dart';
 import 'scene_graph.dart';
 
@@ -42,6 +43,10 @@ class ArScenePainter extends CustomPainter {
   /// keeps partially-visible content (a wide gas cloud, say) from popping.
   final double cullMarginPixels;
 
+  /// Logged once per process. The first scene paint is the step where a
+  /// GPU-side failure would land, and it is otherwise invisible in a crash log.
+  static bool _loggedFirstPaint = false;
+
   @override
   void paint(Canvas canvas, Size size) {
     final visible = <_DrawItem>[];
@@ -70,6 +75,14 @@ class ArScenePainter extends CustomPainter {
       final db = b.projected.depth - b.node.sortBias;
       return db.compareTo(da);
     });
+
+    if (!_loggedFirstPaint) {
+      _loggedFirstPaint = true;
+      Diagnostics.instance.breadcrumb(
+        'ar.render.first nodes=${nodes.length} visible=${visible.length} '
+        'viewport=${size.width.toStringAsFixed(0)}x${size.height.toStringAsFixed(0)}',
+      );
+    }
 
     for (final item in visible) {
       final ctx = NodeRenderContext(

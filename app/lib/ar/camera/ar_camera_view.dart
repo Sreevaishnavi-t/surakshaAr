@@ -18,7 +18,17 @@ enum CameraFailure {
 /// without losing scenario progress. So the controller is disposed on pause and
 /// rebuilt on resume, while the scenario state lives entirely outside this class.
 class ArCameraController extends ChangeNotifier with WidgetsBindingObserver {
-  ArCameraController();
+  ArCameraController({this.forImageStream = false});
+
+  /// Whether this controller will actually call `startImageStream`.
+  ///
+  /// Only the certificate scanner does. Requesting an image format configures
+  /// a CameraX ImageAnalysis pipeline with native YUV-to-NV21 conversion, and
+  /// standing that up for a consumer that never reads a frame is pure overhead
+  /// on the drill path — overhead running in native code, on the exact step
+  /// where the AR session was dying. The drill uses the camera purely as a
+  /// backdrop, so it asks for no analysis pipeline at all.
+  final bool forImageStream;
 
   CameraController? _controller;
   CameraDescription? _description;
@@ -70,11 +80,11 @@ class ArCameraController extends ChangeNotifier with WidgetsBindingObserver {
         // overlay needs far more than the passthrough does.
         ResolutionPreset.medium,
         enableAudio: false,
-        // NV21 rather than YUV420 so ML Kit gets a single contiguous plane.
-        // YUV420 would mean interleaving three planes by hand with per-device
-        // row and pixel strides — a well-known source of frames that look fine
-        // in the preview but detect nothing.
-        imageFormatGroup: ImageFormatGroup.nv21,
+        // NV21 only when frames are actually consumed, so ML Kit gets a single
+        // contiguous plane. YUV420 would mean interleaving three planes by hand
+        // with per-device row and pixel strides — a well-known source of frames
+        // that look fine in the preview but detect nothing.
+        imageFormatGroup: forImageStream ? ImageFormatGroup.nv21 : null,
       );
 
       await controller.initialize();

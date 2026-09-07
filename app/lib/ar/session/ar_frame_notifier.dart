@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 
+import '../../core/diagnostics.dart';
+
 import '../pose/device_pose.dart';
 import '../pose/pose_service.dart';
 
@@ -75,17 +77,26 @@ class ArFrameNotifier extends ChangeNotifier {
         ? _poseService.poses
         : _poseService.streamFor(capabilities);
 
+    Diagnostics.instance.breadcrumb('frames.subscribe.begin');
     _poseSubscription ??= stream.listen(
       (pose) {
+        if (_sampleCount == 0) {
+          Diagnostics.instance.breadcrumb('frames.pose.first source=${pose.source.name}');
+        }
         _pose = pose;
         _sampleCount++;
       },
       onError: (Object error) {
-        debugPrint('ArFrameNotifier: pose error $error');
+        Diagnostics.instance.record('frames.pose.error: $error');
       },
       cancelOnError: false,
     );
-    if (!_ticker.isActive) _ticker.start();
+    Diagnostics.instance.breadcrumb('frames.subscribe.done');
+
+    if (!_ticker.isActive) {
+      _ticker.start();
+      Diagnostics.instance.breadcrumb('frames.ticker.started');
+    }
   }
 
   void _onTick(Duration tickerElapsed) {

@@ -26,7 +26,9 @@ class VerifyScreen extends ConsumerStatefulWidget {
 }
 
 class _VerifyScreenState extends ConsumerState<VerifyScreen> {
-  final ArCameraController _camera = ArCameraController();
+  // The scanner is the only consumer of camera frames, so it is the only place
+  // that needs an NV21 analysis pipeline.
+  final ArCameraController _camera = ArCameraController(forImageStream: true);
   final BarcodeScannerService _scanner = BarcodeScannerService();
 
   VerificationResult? _result;

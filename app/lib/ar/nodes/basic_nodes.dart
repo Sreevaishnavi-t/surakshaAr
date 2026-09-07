@@ -249,6 +249,63 @@ class BillboardNode extends SceneNode {
   }
 }
 
+/// Cache of laid-out icon glyphs.
+///
+/// Building a Paragraph means running the text engine: shaping, layout, the
+/// lot. Doing that once per icon per node per frame was costing far more than
+/// the drawing itself — eight nodes at 60 fps is ~500 layouts a second on a
+/// phone that has a camera preview and a particle system to feed as well.
+///
+/// Keyed on the glyph and its colour. Alpha comes from atmospheric fade, which
+/// is a constant 1.0 for anything inside 8 m, so in practice the cache is hit
+/// on nearly every draw. Colour is quantised so a slow fade cannot fill the map
+/// with near-identical entries, and the cache is capped regardless.
+final Map<int, Paragraph> _glyphCache = <int, Paragraph>{};
+
+const int _glyphCacheLimit = 64;
+const double _glyphLayoutPixels = 64.0;
+
+Paragraph _glyphParagraph(IconData icon, Color color) {
+  // 5 bits of alpha is far finer than the eye resolves and keeps the key space
+  // small.
+  final quantisedAlpha = (color.a * 31).round();
+  final key = Object.hash(
+    icon.codePoint,
+    icon.fontFamily,
+    (color.r * 255).round(),
+    (color.g * 255).round(),
+    (color.b * 255).round(),
+    quantisedAlpha,
+  );
+
+  final cached = _glyphCache[key];
+  if (cached != null) return cached;
+
+  if (_glyphCache.length >= _glyphCacheLimit) {
+    // These are cheap to rebuild, so evicting wholesale is simpler and no worse
+    // than tracking recency.
+    _glyphCache.clear();
+  }
+
+  final builder = ParagraphBuilder(ParagraphStyle(
+    fontFamily: icon.fontFamily,
+    fontSize: _glyphLayoutPixels,
+    height: 1.0,
+  ))
+    ..pushStyle(TextStyle(
+      color: color.withValues(alpha: quantisedAlpha / 31),
+      fontSize: _glyphLayoutPixels,
+      fontFamily: icon.fontFamily,
+    ))
+    ..addText(String.fromCharCode(icon.codePoint));
+
+  final paragraph = builder.build()
+    ..layout(const ParagraphConstraints(width: _glyphLayoutPixels * 1.5));
+
+  _glyphCache[key] = paragraph;
+  return paragraph;
+}
+
 /// Draws a Material icon glyph into world-space canvas units.
 ///
 /// Icons are font glyphs, so they are resolution-independent and scale cleanly
@@ -266,33 +323,15 @@ void paintIconGlyph({
   // Glyphs are laid out at a fixed pixel size and then scaled into metres.
   // Rasterising directly at metre scale would ask the text engine for a ~0.5px
   // font and produce mush.
-  const layoutPixels = 64.0;
-  final builder = ParagraphBuilder(ParagraphStyle(
-    fontFamily: icon.fontFamily,
-    fontSize: layoutPixels,
-    height: 1.0,
-  ))
-    ..pushStyle(TextStyle(
-      color: color,
-      fontSize: layoutPixels,
-      fontFamily: icon.fontFamily,
-      // Without this, tree-shaking strips glyphs that are only referenced
-      // dynamically and the icon renders as a blank box in release builds.
-      fontFamilyFallback: icon.fontPackage == null ? null : const [],
-    ))
-    ..addText(String.fromCharCode(icon.codePoint));
-
-  final paragraph = builder.build()
-    ..layout(const ParagraphConstraints(width: layoutPixels * 1.5));
-
-  final scale = sizeMetres / layoutPixels;
+  final paragraph = _glyphParagraph(icon, color);
+  final scale = sizeMetres / _glyphLayoutPixels;
 
   canvas.save();
   canvas.translate(center.dx, center.dy);
   canvas.scale(scale);
   canvas.drawParagraph(
     paragraph,
-    Offset(-paragraph.longestLine / 2, -layoutPixels / 2),
+    Offset(-paragraph.longestLine / 2, -_glyphLayoutPixels / 2),
   );
   canvas.restore();
 }
