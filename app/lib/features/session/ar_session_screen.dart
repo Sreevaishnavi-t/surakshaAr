@@ -10,8 +10,8 @@ import '../../ar/scene/ar_renderer.dart';
 import '../../ar/session/ar_frame_notifier.dart';
 import '../../core/theme/app_theme.dart';
 import '../../modules/catalogue.dart';
+import '../../modules/act_registry.dart';
 import '../../modules/engine/scenario.dart';
-import '../../modules/m1_fire/fire_act1_exit.dart';
 import 'widgets/scenario_hud.dart';
 import 'widgets/session_gates.dart';
 
@@ -38,7 +38,12 @@ class _ArSessionScreenState extends State<ArSessionScreen>
   final ArCameraController _cameraController = ArCameraController();
 
   late final ArFrameNotifier _frames;
-  late final ArScenario _scenario;
+
+  /// The acts making up this module, and where we are in them.
+  late final List<ArScenario Function()> _actFactories;
+  final List<ScenarioResult> _completedActs = [];
+  late ArScenario _scenario;
+  int _actIndex = 0;
 
   ArCameraIntrinsics _intrinsics = ArCameraIntrinsics.fallback;
   PoseCapabilities _capabilities = PoseCapabilities.unknown;
@@ -50,23 +55,24 @@ class _ArSessionScreenState extends State<ArSessionScreen>
 
   double _calibrationScale = 1.0;
 
+  /// Latest laid-out viewport, captured so [_pumpScenario] can construct a
+  /// camera outside of build.
+  Size? _lastViewport;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(_cameraController);
     _frames = ArFrameNotifier(poseService: _poseService, vsync: this);
-    _scenario = _createScenario(widget.domain);
+    _actFactories = ActRegistry.actsFor(widget.domain);
+    _scenario = _actFactories.first();
     _cameraController.addListener(_onCameraChanged);
+    // Advancing the scenario from the ticker rather than from build(). Doing it
+    // inside build() meant update() -> notifyListeners() marked the HUD's
+    // AnimatedBuilder dirty *during* a build, which trips a framework assert in
+    // debug and leaves the tree in an inconsistent state in release.
+    _frames.addListener(_pumpScenario);
     _prepare();
-  }
-
-  ArScenario _createScenario(SafetyDomain domain) {
-    // Phase 1 ships Fire Act 1. The remaining acts slot in here as they land,
-    // and the screen itself needs no changes to host them.
-    return switch (domain) {
-      SafetyDomain.fire => FireAct1ExitScenario(),
-      _ => FireAct1ExitScenario(),
-    };
   }
 
   Future<void> _prepare() async {
@@ -119,14 +125,62 @@ class _ArSessionScreenState extends State<ArSessionScreen>
     );
   }
 
+  /// Advances the scenario one frame. Called from the frame ticker, outside of
+  /// any build pass.
+  void _pumpScenario() {
+    if (_phase != _SessionPhase.running || _scenario.isFinished) return;
+    final viewport = _lastViewport;
+    if (viewport == null) return;
+
+    _scenario.update(_frames.elapsed, _cameraFor(viewport, _frames.pose));
+
+    if (_scenario.isFinished) _onScenarioFinished();
+  }
+
   void _onScenarioFinished() {
     if (_phase == _SessionPhase.finished) return;
     _frames.pause();
     setState(() => _phase = _SessionPhase.finished);
   }
 
+  bool get _hasMoreActs => _actIndex + 1 < _actFactories.length;
+
+  int get _actNumber => _actIndex + 1;
+
+  int get _actTotal => _actFactories.length;
+
+  /// Records the finished act and moves to the next, or ends the module.
+  ///
+  /// A failed act still advances. Stopping the module on the first mistake
+  /// would deny the worker the rest of the training over one wrong tap, and the
+  /// failure is already recorded against them.
+  void _advanceAct() {
+    final result = _scenario.result;
+    if (result != null) _completedActs.add(result);
+
+    if (!_hasMoreActs) {
+      Navigator.of(context).pop(
+        combineActs(domain: widget.domain, acts: _completedActs),
+      );
+      return;
+    }
+
+    setState(() {
+      _actIndex++;
+      _scenario.dispose();
+      _scenario = _actFactories[_actIndex]();
+      // Each act re-origins on the worker's current heading, so they are not
+      // penalised for having turned during the previous one.
+      _worldFromScene = ArCamera.calibrationFromYaw(_frames.pose.yaw);
+      _phase = _SessionPhase.running;
+    });
+
+    _frames.resume(_frames.elapsed);
+  }
+
   @override
   void dispose() {
+    _frames.removeListener(_pumpScenario);
     _cameraController.removeListener(_onCameraChanged);
     WidgetsBinding.instance.removeObserver(_cameraController);
     _frames.dispose();
@@ -160,6 +214,7 @@ class _ArSessionScreenState extends State<ArSessionScreen>
     return LayoutBuilder(
       builder: (context, constraints) {
         final viewport = Size(constraints.maxWidth, constraints.maxHeight);
+        _lastViewport = viewport;
 
         return Stack(
           fit: StackFit.expand,
@@ -174,15 +229,6 @@ class _ArSessionScreenState extends State<ArSessionScreen>
                 final pose = _frames.pose;
                 final camera = _cameraFor(viewport, pose);
 
-                if (_phase == _SessionPhase.running && !_scenario.isFinished) {
-                  _scenario.update(_frames.elapsed, camera);
-                  if (_scenario.isFinished) {
-                    WidgetsBinding.instance.addPostFrameCallback(
-                      (_) => _onScenarioFinished(),
-                    );
-                  }
-                }
-
                 return Stack(
                   fit: StackFit.expand,
                   children: [
@@ -195,6 +241,15 @@ class _ArSessionScreenState extends State<ArSessionScreen>
                           : null,
                       onEmptyTap: _phase == _SessionPhase.running
                           ? (_) => _scenario.handleEmptyTap()
+                          : null,
+                      onDrag: _phase == _SessionPhase.running
+                          ? _scenario.handleDrag
+                          : null,
+                      onPressStart: _phase == _SessionPhase.running
+                          ? _scenario.handlePressStart
+                          : null,
+                      onPressEnd: _phase == _SessionPhase.running
+                          ? _scenario.handlePressEnd
                           : null,
                     ),
 
@@ -240,7 +295,10 @@ class _ArSessionScreenState extends State<ArSessionScreen>
                 result: _scenario.result!,
                 // Hand the result back so the module screen can record it.
                 // Every attempt is kept, passes and failures alike.
-                onDone: () => Navigator.of(context).pop(_scenario.result),
+                actNumber: _actNumber,
+                actTotal: _actTotal,
+                hasMoreActs: _hasMoreActs,
+                onDone: _advanceAct,
               ),
 
             if (!_intrinsics.isMeasured && _phase == _SessionPhase.running)
@@ -284,7 +342,15 @@ class _ArSessionScreenState extends State<ArSessionScreen>
     if (!mounted) return;
     if (leave ?? false) {
       _scenario.abandon();
-      if (mounted) Navigator.of(context).pop(_scenario.result);
+      final result = _scenario.result;
+      if (result != null) _completedActs.add(result);
+      if (mounted) {
+        Navigator.of(context).pop(
+          _completedActs.isEmpty
+              ? null
+              : combineActs(domain: widget.domain, acts: _completedActs),
+        );
+      }
     } else {
       _frames.resume(_frames.elapsed);
     }

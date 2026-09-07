@@ -31,8 +31,13 @@ android {
             // sideloading both work. A real deployment needs its own upload key; see
             // docs/threat-model.md.
             signingConfig = signingConfigs.getByName("debug")
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // Minification is off while a device-specific crash is being
+            // isolated. R8 strips reflectively-reached classes (CameraX in
+            // particular relies on them heavily), which produces release-only
+            // failures that never appear in debug. Re-enable with verified keep
+            // rules once the crash is confirmed fixed.
+            isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

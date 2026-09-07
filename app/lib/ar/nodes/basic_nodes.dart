@@ -191,7 +191,11 @@ class BillboardNode extends SceneNode {
   }) : super(hitRadiusMetres: sizeMetres * 0.85);
 
   final IconData icon;
-  final Color color;
+
+  /// Mutable: scenarios recolour a billboard to show selection, completion or a
+  /// wrong choice, which is the clearest feedback available without text.
+  Color color;
+
   final String? label;
   final double sizeMetres;
   final bool showGroundRing;

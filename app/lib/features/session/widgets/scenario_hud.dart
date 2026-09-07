@@ -299,10 +299,18 @@ class ScenarioResultSheet extends StatelessWidget {
     super.key,
     required this.result,
     required this.onDone,
+    this.actNumber = 1,
+    this.actTotal = 1,
+    this.hasMoreActs = false,
   });
 
   final ScenarioResult result;
   final VoidCallback onDone;
+
+  /// Position within the module, so a worker knows how much is left.
+  final int actNumber;
+  final int actTotal;
+  final bool hasMoreActs;
 
   @override
   Widget build(BuildContext context) {
@@ -326,6 +334,16 @@ class ScenarioResultSheet extends StatelessWidget {
               children: [
                 Icon(signal.icon, size: 60, color: signal.color),
                 const SizedBox(height: 16),
+                if (actTotal > 1)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text(
+                      'Part $actNumber of $actTotal',
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: Colors.white54,
+                      ),
+                    ),
+                  ),
                 Text(
                   passed ? 'Drill complete' : 'Drill not passed',
                   style: theme.textTheme.headlineSmall?.copyWith(
@@ -416,7 +434,7 @@ class ScenarioResultSheet extends StatelessWidget {
                   width: double.infinity,
                   child: FilledButton(
                     onPressed: onDone,
-                    child: const Text('Done'),
+                    child: Text(hasMoreActs ? 'Next part' : 'Done'),
                   ),
                 ),
               ],

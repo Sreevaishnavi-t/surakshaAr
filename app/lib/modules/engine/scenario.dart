@@ -1,3 +1,5 @@
+import 'dart:ui' show Offset;
+
 import 'package:flutter/foundation.dart';
 
 import '../../ar/scene/ar_camera.dart';
@@ -144,6 +146,18 @@ abstract class ArScenario extends ChangeNotifier {
   /// A tap that hit nothing. Some steps score this (jabbing at random costs
   /// points), most ignore it.
   void handleEmptyTap() {}
+
+  /// A drag across the screen. Used for the "pull the pin" gesture, which is a
+  /// physical action in reality and should be a physical action here rather
+  /// than a button labelled "pull".
+  void handleDrag(Offset delta) {}
+
+  /// The worker pressed and held. Used for squeezing an extinguisher handle:
+  /// discharge continues only while held, which is what makes running out of
+  /// agent a real consequence of poor aim.
+  void handlePressStart() {}
+
+  void handlePressEnd() {}
 
   bool get isFinished;
 

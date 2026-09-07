@@ -176,6 +176,9 @@ class ArSceneView extends StatelessWidget {
     required this.elapsed,
     this.onNodeTap,
     this.onEmptyTap,
+    this.onDrag,
+    this.onPressStart,
+    this.onPressEnd,
   });
 
   final ArCamera camera;
@@ -183,6 +186,13 @@ class ArSceneView extends StatelessWidget {
   final Duration elapsed;
   final void Function(SceneNode node)? onNodeTap;
   final void Function(Offset position)? onEmptyTap;
+
+  /// Screen drag, for gestures like pulling an extinguisher pin.
+  final void Function(Offset delta)? onDrag;
+
+  /// Press and hold, for squeezing an extinguisher handle.
+  final VoidCallback? onPressStart;
+  final VoidCallback? onPressEnd;
 
   @override
   Widget build(BuildContext context) {
@@ -200,6 +210,12 @@ class ArSceneView extends StatelessWidget {
           onEmptyTap?.call(details.localPosition);
         }
       },
+      onPanUpdate: onDrag == null ? null : (d) => onDrag!(d.delta),
+      // Long-press rather than tap-down for the squeeze, so a tap meant for a
+      // scene node is never misread as starting a discharge.
+      onLongPressStart: onPressStart == null ? null : (_) => onPressStart!(),
+      onLongPressEnd: onPressEnd == null ? null : (_) => onPressEnd!(),
+      onLongPressCancel: onPressEnd,
       child: CustomPaint(
         size: Size.infinite,
         painter: ArScenePainter(
