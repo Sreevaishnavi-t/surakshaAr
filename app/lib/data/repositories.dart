@@ -170,6 +170,20 @@ class AttemptRepository {
     return id;
   }
 
+  /// Reads a numeric column without assuming its Dart type.
+  ///
+  /// SQLite is dynamically typed: a REAL column holding an integral value can
+  /// come back through the platform channel as an int. Casting straight to
+  /// double therefore throws for a perfectly ordinary score of exactly 100 —
+  /// and because these reads happen while a screen is loading, that exception
+  /// left the module screen spinning forever instead of showing anything.
+  static double? _readNumber(Object? value) {
+    if (value == null) return null;
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value);
+    return null;
+  }
+
   /// Best drill score a worker has achieved in a domain, or null if untried.
   Future<double?> bestDrillScore(String workerId, SafetyDomain domain) async {
     final rows = await _db.raw.rawQuery(
@@ -177,7 +191,8 @@ class AttemptRepository {
       'WHERE worker_id = ? AND domain = ? AND passed = 1',
       [workerId, domain.code],
     );
-    return rows.first['best'] as double?;
+    if (rows.isEmpty) return null;
+    return _readNumber(rows.first['best']);
   }
 
   Future<double?> bestAssessmentScore(String workerId, SafetyDomain domain) async {
@@ -186,7 +201,8 @@ class AttemptRepository {
       'WHERE worker_id = ? AND domain = ? AND passed = 1',
       [workerId, domain.code],
     );
-    return rows.first['best'] as double?;
+    if (rows.isEmpty) return null;
+    return _readNumber(rows.first['best']);
   }
 
   /// Domains where the worker has passed both the drill and the assessment.

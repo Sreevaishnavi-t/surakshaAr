@@ -33,6 +33,13 @@ class Diagnostics {
   File? _file;
   bool _installed = false;
 
+  /// Serialises appends.
+  ///
+  /// Writes were previously fire-and-forget, so several could be in flight at
+  /// once and interleave, shredding the very log meant to explain a crash and
+  /// leaving half-lines behind. Each append now waits for the previous one.
+  Future<void> _writeQueue = Future<void>.value();
+
   List<String> get entries => List.unmodifiable(_entries);
 
   /// The breadcrumb trail from the previous run, if the app died unexpectedly.
@@ -114,9 +121,14 @@ class Diagnostics {
     unawaited(_append(line, stackTrace));
   }
 
-  Future<void> _append(String line, StackTrace? stackTrace) async {
+  Future<void> _append(String line, StackTrace? stackTrace) {
     final file = _file;
-    if (file == null) return;
+    if (file == null) return Future<void>.value();
+    _writeQueue = _writeQueue.then((_) => _write(file, line, stackTrace));
+    return _writeQueue;
+  }
+
+  Future<void> _write(File file, String line, StackTrace? stackTrace) async {
     try {
       final buffer = StringBuffer(line)..writeln();
       if (stackTrace != null) {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../assessment/assessment_engine.dart';
+import '../../core/diagnostics.dart';
 import '../../core/l10n/app_localizations.dart';
 import '../../core/services.dart';
 import '../../core/theme/app_theme.dart';
@@ -18,11 +19,7 @@ import '../session/ar_session_screen.dart';
 /// retention after a week — that this whole platform exists to replace. So the
 /// screen shows them as two gates rather than one score.
 class ModuleScreen extends ConsumerStatefulWidget {
-  const ModuleScreen({
-    super.key,
-    required this.domain,
-    required this.worker,
-  });
+  const ModuleScreen({super.key, required this.domain, required this.worker});
 
   final SafetyDomain domain;
   final WorkerRecord worker;
@@ -35,6 +32,7 @@ class _ModuleScreenState extends ConsumerState<ModuleScreen> {
   double? _drillScore;
   double? _assessmentScore;
   bool _loading = true;
+  Object? _loadError;
 
   @override
   void initState() {
@@ -43,24 +41,42 @@ class _ModuleScreenState extends ConsumerState<ModuleScreen> {
   }
 
   Future<void> _refresh() async {
-    final attempts = ref.read(servicesProvider).attempts;
-    final drill = await attempts.bestDrillScore(widget.worker.id, widget.domain);
-    final assessment =
-        await attempts.bestAssessmentScore(widget.worker.id, widget.domain);
+    try {
+      final attempts = ref.read(servicesProvider).attempts;
+      final drill = await attempts.bestDrillScore(
+        widget.worker.id,
+        widget.domain,
+      );
+      final assessment = await attempts.bestAssessmentScore(
+        widget.worker.id,
+        widget.domain,
+      );
 
-    if (!mounted) return;
-    setState(() {
-      _drillScore = drill;
-      _assessmentScore = assessment;
-      _loading = false;
-    });
+      if (!mounted) return;
+      setState(() {
+        _drillScore = drill;
+        _assessmentScore = assessment;
+        _loadError = null;
+        _loading = false;
+      });
+    } catch (error, stack) {
+      // A screen that spins forever tells the worker nothing and a supervisor
+      // even less. Surface the failure and offer a retry.
+      Diagnostics.instance.record(
+        'module.refresh failed: $error',
+        stackTrace: stack,
+      );
+      if (!mounted) return;
+      setState(() {
+        _loadError = error;
+        _loading = false;
+      });
+    }
   }
 
   Future<void> _runDrill() async {
     final result = await Navigator.of(context).push<ScenarioResult>(
-      MaterialPageRoute(
-        builder: (_) => ArSessionScreen(domain: widget.domain),
-      ),
+      MaterialPageRoute(builder: (_) => ArSessionScreen(domain: widget.domain)),
     );
 
     if (result == null || !mounted) return;
@@ -69,10 +85,10 @@ class _ModuleScreenState extends ConsumerState<ModuleScreen> {
     // lift during a fire drill and learned not to is exactly the evidence a
     // safety officer wants, and silently discarding failed attempts would make
     // the compliance record flattering rather than useful.
-    await ref.read(servicesProvider).attempts.recordDrill(
-          workerId: widget.worker.id,
-          result: result,
-        );
+    await ref
+        .read(servicesProvider)
+        .attempts
+        .recordDrill(workerId: widget.worker.id, result: result);
 
     if (mounted) await _refresh();
   }
@@ -86,10 +102,10 @@ class _ModuleScreenState extends ConsumerState<ModuleScreen> {
 
     if (result == null || !mounted) return;
 
-    await ref.read(servicesProvider).attempts.recordAssessment(
-          workerId: widget.worker.id,
-          result: result,
-        );
+    await ref
+        .read(servicesProvider)
+        .attempts
+        .recordAssessment(workerId: widget.worker.id, result: result);
 
     if (mounted) await _refresh();
   }
@@ -108,6 +124,14 @@ class _ModuleScreenState extends ConsumerState<ModuleScreen> {
       appBar: AppBar(title: Text(module.title(l10n))),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
+          : _loadError != null
+          ? _LoadFailure(
+              error: _loadError!,
+              onRetry: () {
+                setState(() => _loading = true);
+                _refresh();
+              },
+            )
           : SingleChildScrollView(
               padding: const EdgeInsets.all(20),
               child: Column(
@@ -125,7 +149,8 @@ class _ModuleScreenState extends ConsumerState<ModuleScreen> {
                   _StageCard(
                     step: 1,
                     title: 'AR drill',
-                    body: 'Practise in your own surroundings. You are scored on '
+                    body:
+                        'Practise in your own surroundings. You are scored on '
                         'what you do and how fast you do it.',
                     icon: Icons.view_in_ar_outlined,
                     accent: module.accent,
@@ -137,13 +162,15 @@ class _ModuleScreenState extends ConsumerState<ModuleScreen> {
                   _StageCard(
                     step: 2,
                     title: 'Assessment',
-                    body: 'Questions that check you understand why, not just '
+                    body:
+                        'Questions that check you understand why, not just '
                         'what. Some must be answered correctly to pass.',
                     icon: Icons.quiz_outlined,
                     accent: module.accent,
                     score: assessment,
-                    actionLabel:
-                        assessment == null ? 'Start assessment' : 'Try again',
+                    actionLabel: assessment == null
+                        ? 'Start assessment'
+                        : 'Try again',
                     onAction: _runAssessment,
                   ),
 
@@ -163,6 +190,48 @@ class _ModuleScreenState extends ConsumerState<ModuleScreen> {
                 ],
               ),
             ),
+    );
+  }
+}
+
+class _LoadFailure extends StatelessWidget {
+  const _LoadFailure({required this.error, required this.onRetry});
+
+  final Object error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.error_outline,
+              size: 52,
+              color: AppTheme.hazardRed,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Could not read your training record',
+              textAlign: TextAlign.center,
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 10),
+            SelectableText(
+              error.toString(),
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
+            const SizedBox(height: 20),
+            FilledButton(onPressed: onRetry, child: const Text('Try again')),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -295,8 +364,11 @@ class _CompositePanel extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.verified_outlined,
-                  color: AppTheme.safeGreen, size: 26),
+              const Icon(
+                Icons.verified_outlined,
+                color: AppTheme.safeGreen,
+                size: 26,
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
@@ -330,7 +402,10 @@ class _CompositePanel extends StatelessWidget {
 }
 
 class _PendingPanel extends StatelessWidget {
-  const _PendingPanel({required this.needsDrill, required this.needsAssessment});
+  const _PendingPanel({
+    required this.needsDrill,
+    required this.needsAssessment,
+  });
 
   final bool needsDrill;
   final bool needsAssessment;
@@ -357,10 +432,9 @@ class _PendingPanel extends StatelessWidget {
             child: Text(
               'Pass $missing to complete this module. Both are needed before a '
               'certificate can be issued.',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodyMedium
-                  ?.copyWith(height: 1.4),
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(height: 1.4),
             ),
           ),
         ],
@@ -383,16 +457,20 @@ class _IntroductoryNotice extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.info_outline, size: 18, color: AppTheme.cautionAmber),
+          const Icon(
+            Icons.info_outline,
+            size: 18,
+            color: AppTheme.cautionAmber,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               'This is a short introductory module. Fire and Gas are the two '
               'full-length drills.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppTheme.cautionAmber,
-                    height: 1.35,
-                  ),
+                color: AppTheme.cautionAmber,
+                height: 1.35,
+              ),
             ),
           ),
         ],

@@ -63,17 +63,18 @@ class FireNode extends SceneNode {
       ),
       Paint()
         ..color = const Color(0xFFFF6D00).withValues(alpha: alpha * 0.30)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 0.12),
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, ctx.blurUnits(18)),
     );
 
     // Three tongues, outermost and coolest first.
-    _paintTongue(canvas, t, alpha * 0.55, scale, 1.0, const Color(0xFFD84315), 0.0);
-    _paintTongue(canvas, t, alpha * 0.75, scale, 0.72, const Color(0xFFFF9100), 1.9);
-    _paintTongue(canvas, t, alpha * 0.95, scale, 0.42, const Color(0xFFFFD54F), 3.4);
+    _paintTongue(canvas, ctx, t, alpha * 0.55, scale, 1.0, const Color(0xFFD84315), 0.0);
+    _paintTongue(canvas, ctx, t, alpha * 0.75, scale, 0.72, const Color(0xFFFF9100), 1.9);
+    _paintTongue(canvas, ctx, t, alpha * 0.95, scale, 0.42, const Color(0xFFFFD54F), 3.4);
   }
 
   void _paintTongue(
     Canvas canvas,
+    NodeRenderContext ctx,
     double t,
     double alpha,
     double scale,
@@ -108,7 +109,7 @@ class FireNode extends SceneNode {
       path,
       Paint()
         ..color = color.withValues(alpha: alpha)
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, 0.03 * scale),
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, ctx.blurUnits(6)),
     );
   }
 }
@@ -214,7 +215,9 @@ class SmokeColumnNode extends SceneNode {
                 life * 0.6,
               )!
               .withValues(alpha: alpha * fade * 0.42)
-          ..maskFilter = MaskFilter.blur(BlurStyle.normal, radius * 0.55),
+          // Screen-space, and capped. Expressed in metres this reached a
+          // ~450px sigma across 46 particles and took the GPU down with it.
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, ctx.blurUnits(20)),
       );
     }
   }

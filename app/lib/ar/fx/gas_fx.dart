@@ -54,10 +54,7 @@ class GasCloudNode extends SceneNode {
         radiusMetres * 0.42,
         Paint()
           ..color = tint.withValues(alpha: alpha * 0.085)
-          ..maskFilter = MaskFilter.blur(
-            BlurStyle.normal,
-            radiusMetres * 0.35,
-          ),
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, ctx.blurUnits(26)),
       );
     }
   }

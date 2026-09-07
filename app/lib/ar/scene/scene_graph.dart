@@ -46,6 +46,25 @@ class NodeRenderContext {
   final double angleFromCentre;
 
   double get seconds => elapsed.inMicroseconds / 1e6;
+
+  /// Converts a blur radius expressed in **screen pixels** into canvas units.
+  ///
+  /// Essential, not cosmetic. Blur sigma is applied in the canvas coordinate
+  /// system, and this renderer scales that system by [pixelsPerMetre] — often
+  /// several hundred. A sigma written as a plain metre value therefore becomes a
+  /// several-hundred-pixel blur at close range, and a scene with a few dozen
+  /// blurred particles will exhaust or hang the GPU rather than merely running
+  /// slowly.
+  ///
+  /// [maxScreenPixels] caps the result so a node that drifts very close to the
+  /// camera cannot spike the cost. Visually this is also the more correct
+  /// behaviour: a soft edge should stay soft by roughly the same amount on
+  /// screen rather than growing without bound as the worker approaches.
+  double blurUnits(double screenPixels, {double maxScreenPixels = 32}) {
+    if (pixelsPerMetre <= 0) return 0;
+    final clamped = screenPixels < maxScreenPixels ? screenPixels : maxScreenPixels;
+    return clamped / pixelsPerMetre;
+  }
 }
 
 /// A drawable anchored in scene space.
