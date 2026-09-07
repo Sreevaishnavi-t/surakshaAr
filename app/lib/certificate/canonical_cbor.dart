@@ -219,7 +219,19 @@ class _CborReader {
       case CanonicalCbor.majorBytes:
         return CborBytes(_readSlice(_readArgument(additional)));
       case CanonicalCbor.majorText:
-        return utf8.decode(_readSlice(_readArgument(additional)));
+        final raw = _readSlice(_readArgument(additional));
+        try {
+          // Strict decoding: malformed sequences must be rejected, not silently
+          // replaced with U+FFFD. A replacement character would change the
+          // worker's name while still producing a "successful" parse.
+          return utf8.decode(raw, allowMalformed: false);
+        } on FormatException catch (e) {
+          // Never let a dart:convert exception escape the decoder. Certificate
+          // bytes are attacker-controlled — a corrupted or forged QR must
+          // surface as a clean CborError the scanner can report, not as an
+          // unhandled crash on the verification screen.
+          throw CborError('Text string is not valid UTF-8: ${e.message}');
+        }
       case CanonicalCbor.majorArray:
         final length = _readArgument(additional);
         return List<Object?>.generate(length, (_) => readValue(), growable: false);
