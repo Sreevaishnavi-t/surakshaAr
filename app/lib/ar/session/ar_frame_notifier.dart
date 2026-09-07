@@ -1,0 +1,94 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
+
+import '../pose/device_pose.dart';
+import '../pose/pose_service.dart';
+
+/// Drives one AR frame clock and decouples it from the sensor rate.
+///
+/// The pose sensor delivers around 100 Hz while the display runs at 60. Calling
+/// `setState` per sensor sample would rebuild the tree roughly 40 extra times a
+/// second for frames nobody ever sees — a real cost on the budget hardware this
+/// targets. So sensor samples update a plain field, and only the vsync ticker
+/// notifies listeners. Widgets rebuild exactly once per rendered frame.
+class ArFrameNotifier extends ChangeNotifier {
+  ArFrameNotifier({
+    required PoseService poseService,
+    required TickerProvider vsync,
+    // Dart forbids a named parameter starting with an underscore, so the lint's
+    // suggested `this._poseService` is not expressible here.
+    // ignore: prefer_initializing_formals
+  }) : _poseService = poseService {
+    _ticker = vsync.createTicker(_onTick);
+  }
+
+  final PoseService _poseService;
+  late final Ticker _ticker;
+
+  StreamSubscription<DevicePose>? _poseSubscription;
+
+  DevicePose _pose = DevicePose.identity;
+  Duration _elapsed = Duration.zero;
+  Duration _pausedAt = Duration.zero;
+  bool _paused = false;
+  int _sampleCount = 0;
+
+  DevicePose get pose => _pose;
+
+  /// Time since [start], excluding any paused spans. Everything visual and every
+  /// scoring timer reads from this one clock, so a replay is reproducible.
+  Duration get elapsed => _elapsed;
+
+  bool get isPaused => _paused;
+
+  /// True once at least one real sensor sample has arrived. Until then the view
+  /// is showing the identity pose and should say so rather than silently
+  /// pretending to track.
+  bool get hasPose => _sampleCount > 0;
+
+  PoseSource get source => _pose.source;
+
+  Future<void> start() async {
+    _poseSubscription ??= _poseService.poses.listen(
+      (pose) {
+        _pose = pose;
+        _sampleCount++;
+      },
+      onError: (Object error) {
+        debugPrint('ArFrameNotifier: pose error $error');
+      },
+      cancelOnError: false,
+    );
+    if (!_ticker.isActive) _ticker.start();
+  }
+
+  void _onTick(Duration tickerElapsed) {
+    if (_paused) return;
+    _elapsed = tickerElapsed - _pausedAt;
+    notifyListeners();
+  }
+
+  /// Freezes the scene clock. Used when a step completes and a result overlay is
+  /// shown, so animation and timers do not keep running behind the dialog.
+  void pause() {
+    if (_paused) return;
+    _paused = true;
+    notifyListeners();
+  }
+
+  void resume(Duration tickerNow) {
+    if (!_paused) return;
+    _pausedAt = tickerNow - _elapsed;
+    _paused = false;
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    unawaited(_poseSubscription?.cancel());
+    _poseSubscription = null;
+    super.dispose();
+  }
+}

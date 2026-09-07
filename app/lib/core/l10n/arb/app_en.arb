@@ -1,0 +1,83 @@
+{
+  "@@locale": "en",
+  "@@context": "English is the primary/source language for SurakshaAR. Every other locale is a translation of this file, and English is the terminal fallback so no string can render blank.",
+
+  "appName": "SurakshaAR",
+  "@appName": {
+    "description": "Application name. 'Suraksha' means safety in Hindi. Not translated."
+  },
+
+  "appTagline": "Industrial safety training that works offline",
+  "@appTagline": {
+    "description": "Subtitle on the launch screen."
+  },
+
+  "homeStartTraining": "Start training",
+  "@homeStartTraining": {
+    "description": "Primary action on the home screen."
+  },
+
+  "homeMyCertificate": "My certificate",
+  "homeVerifyCertificate": "Verify a certificate",
+  "homeSettings": "Settings",
+
+  "moduleFireTitle": "Fire & Explosion Response",
+  "@moduleFireTitle": {
+    "description": "Training domain 1."
+  },
+  "moduleFireSummary": "Find the exit, choose the right extinguisher, and evacuate in the correct order.",
+
+  "moduleGasTitle": "Gas Leak & Confined Space",
+  "@moduleGasTitle": {
+    "description": "Training domain 2."
+  },
+  "moduleGasSummary": "Recognise the hazard zone, select correct PPE, and follow buddy-system procedure.",
+
+  "moduleMachineryTitle": "Machinery & Lockout-Tagout",
+  "moduleMachinerySummary": "Isolate energy sources and apply locks and tags in the correct sequence.",
+
+  "moduleStrataTitle": "Roof Fall & Working at Height",
+  "moduleStrataSummary": "Inspect roof support, spot warning signs, and select fall-arrest anchors.",
+
+  "moduleElectricalTitle": "Electrical Hazards & First Aid",
+  "moduleElectricalSummary": "Isolate safely, avoid arc flash, and act in the first minutes after a shock.",
+
+  "arReadinessTitle": "Checking your phone",
+  "arReadinessCameraNeeded": "Camera access is needed to show training in your surroundings.",
+  "arReadinessGrantCamera": "Allow camera",
+  "arReadinessNoCamera": "No camera found on this phone. You can still take assessments and hold a certificate.",
+  "arReadinessNoMotionSensor": "This phone has no motion sensor, so the training view cannot stay locked to your surroundings. The drill will still work.",
+  "arReadinessMagnetometerWarning": "This phone uses a compass sensor for tracking. Near heavy machinery or underground, the view may drift.",
+  "arReadinessContinue": "Continue",
+
+  "arCalibrateTitle": "Face your work area",
+  "arCalibrateInstruction": "Hold the phone up and look towards an open space, then tap to begin.",
+  "arCalibrateAction": "Begin drill",
+
+  "arTrackingLost": "Hold the phone steady",
+  "arScanningForMarker": "Point at a printed SurakshaAR marker to lock the scene in place",
+  "arMarkerLocked": "Scene locked to marker",
+
+  "commonNext": "Next",
+  "commonBack": "Back",
+  "commonRetry": "Try again",
+  "commonExit": "Exit",
+  "commonCancel": "Cancel",
+  "commonContinue": "Continue",
+  "commonListen": "Listen",
+  "@commonListen": {
+    "description": "Button that plays the audio narration of the current instruction. Critical for low-literacy workers."
+  },
+
+  "settingsLanguage": "Language",
+  "settingsLanguageEnglish": "English",
+  "settingsLanguageHindi": "Hindi",
+  "settingsLanguageSantali": "Santali",
+  "settingsCalibration": "Camera calibration",
+  "settingsCalibrationHelp": "If overlays do not line up with what you see, adjust this slider.",
+
+  "translationPendingReview": "Draft translation — pending review",
+  "@translationPendingReview": {
+    "description": "Badge shown on strings that have not yet been checked by a native speaker. Safety wording must never be presented as authoritative before review."
+  }
+}

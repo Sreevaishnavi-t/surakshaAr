@@ -1,0 +1,8 @@
+# English is the primary/source language: app_en.arb is the template that all
+# other locales are translated from, and the terminal fallback for any missing key.
+arb-dir: lib/core/l10n/arb
+output-dir: lib/core/l10n
+template-arb-file: app_en.arb
+output-localization-file: app_localizations.dart
+output-class: L
+nullable-getter: false

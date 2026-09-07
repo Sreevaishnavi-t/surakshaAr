@@ -1,0 +1,34 @@
+# Flutter / Dart
+app/build/
+app/.dart_tool/
+app/.flutter-plugins-dependencies
+app/android/.gradle/
+app/android/local.properties
+app/android/app/.cxx/
+build/
+.dart_tool/
+*.iml
+
+# Generated localisations (regenerate with `flutter gen-l10n`)
+app/lib/core/l10n/app_localizations*.dart
+
+# Node
+node_modules/
+dist/
+*.log
+
+# Secrets — the organisation signing key must never be committed.
+# See docs/threat-model.md.
+keys/
+*.key
+*.pem
+!**/*.pub.pem
+
+# Local databases
+*.sqlite
+*.sqlite3
+*.db
+
+# OS
+.DS_Store
+Thumbs.db
