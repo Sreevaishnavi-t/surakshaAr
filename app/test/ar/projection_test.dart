@@ -304,6 +304,8 @@ void main() {
     });
   });
 
+  _fallbackPoseTests();
+
   group('scenePlacement', () {
     test('bearing 0 is straight ahead along scene +Y', () {
       final ahead = scenePlacement(bearingDegrees: 0, distanceMetres: 5);
@@ -322,6 +324,86 @@ void main() {
         final placed = scenePlacement(bearingDegrees: bearing, distanceMetres: 7);
         expect(placed.length, closeTo(7, 1e-9));
       }
+    });
+  });
+}
+
+/// Regression guard for the "camera opens but nothing appears" failure.
+///
+/// The identity quaternion describes a phone lying flat on its back, so the rear
+/// camera points at the floor and every piece of eye-level content projects
+/// behind the near plane and is culled. Defaulting to it produced an AR view
+/// that rendered an empty scene over a working camera feed — which reads as a
+/// broken app while the calibration gate promises the drill still works without
+/// a motion sensor.
+void _fallbackPoseTests() {
+  group('pose fallback', () {
+    test('the identity pose aims the camera at the floor', () {
+      // Documents *why* identity is the wrong default.
+      final direction = DevicePose.identity.viewDirection;
+      expect(direction.z, closeTo(-1, 1e-9));
+    });
+
+    test('every scene node is culled at the identity pose', () {
+      final camera = ArCamera(
+        pose: DevicePose.identity,
+        intrinsics: ArCameraIntrinsics.fallback,
+        previewSize: const Size(720, 1280),
+        viewportSize: const Size(1080, 1920),
+        worldFromScene: ArCamera.calibrationFromYaw(DevicePose.identity.yaw),
+      );
+
+      for (final bearing in [0.0, 45.0, -90.0, 170.0]) {
+        expect(
+          camera.project(
+            scenePlacement(bearingDegrees: bearing, distanceMetres: 6),
+          ),
+          isNull,
+          reason: 'bearing $bearing unexpectedly visible at identity',
+        );
+      }
+    });
+
+    test('the upright fallback puts content in front of the worker', () {
+      for (final yaw in [0.0, 1.3, -2.2, math.pi]) {
+        final pose = DevicePose.upright(yawRadians: yaw);
+        final camera = ArCamera(
+          pose: pose,
+          intrinsics: ArCameraIntrinsics.fallback,
+          previewSize: const Size(720, 1280),
+          viewportSize: const Size(1080, 1920),
+          worldFromScene: ArCamera.calibrationFromYaw(pose.yaw),
+        );
+
+        final projected = camera.project(
+          scenePlacement(bearingDegrees: 0, distanceMetres: 6),
+        );
+
+        expect(projected, isNotNull, reason: 'yaw $yaw should be visible');
+        expect(projected!.screen.dx, closeTo(camera.viewportCenter.dx, 0.5));
+        expect(projected.screen.dy, closeTo(camera.viewportCenter.dy, 0.5));
+      }
+    });
+
+    test('the upright fallback is level and matches its requested heading', () {
+      for (final yaw in [0.0, 0.9, -1.7]) {
+        final pose = DevicePose.upright(yawRadians: yaw);
+        expect(pose.pitch, closeTo(0, 1e-9));
+        expect(math.cos(pose.yaw), closeTo(math.cos(yaw), 1e-9));
+        expect(math.sin(pose.yaw), closeTo(math.sin(yaw), 1e-9));
+      }
+    });
+
+    test('upright agrees with the hand-built test pose', () {
+      // Ties the production fallback to the pose the rest of this file uses,
+      // so the two cannot drift apart.
+      final built = uprightPose(0.75).worldFromDevice;
+      final fallback = DevicePose.upright(yawRadians: 0.75).worldFromDevice;
+
+      expect(fallback.x, closeTo(built.x, 1e-9));
+      expect(fallback.y, closeTo(built.y, 1e-9));
+      expect(fallback.z, closeTo(built.z, 1e-9));
+      expect(fallback.w, closeTo(built.w, 1e-9));
     });
   });
 }

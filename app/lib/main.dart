@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/diagnostics.dart';
 import 'core/l10n/app_localizations.dart';
 import 'core/services.dart';
 import 'core/theme/app_theme.dart';
@@ -9,6 +10,12 @@ import 'features/home/home_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Installed first so it captures failures in everything that follows,
+  // including the service bootstrap below.
+  await Diagnostics.instance.install();
+  Diagnostics.instance.breadcrumb('app.start');
+
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
   // Services are brought up before the first frame. If the database or the
@@ -21,7 +28,9 @@ Future<void> main() async {
 
   try {
     services = await AppServices.initialise();
+    Diagnostics.instance.breadcrumb('app.services.ready');
   } catch (error, stack) {
+    Diagnostics.instance.record('STARTUP FAILED: $error', stackTrace: stack);
     startupError = error;
     startupStack = stack;
   }

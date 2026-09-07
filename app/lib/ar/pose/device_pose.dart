@@ -58,12 +58,57 @@ class DevicePose {
 
   final Duration timestamp;
 
+  /// The identity orientation: a phone lying **flat on its back**, camera
+  /// pointing at the floor.
+  ///
+  /// Almost never what you want as a default. Because the rear camera looks
+  /// along device −Z, the identity pose aims it straight down, so every piece
+  /// of scene content at eye level projects behind the camera and is culled.
+  /// Use [upright] for a usable fallback.
   static DevicePose get identity => DevicePose(
         worldFromDevice: Quaternion.identity(),
         source: PoseSource.none,
         displayRotationDegrees: 0,
         timestamp: Duration.zero,
       );
+
+  /// A phone held upright like a window, facing [yawRadians].
+  ///
+  /// This is the fallback used when no motion sensor is delivering data. It
+  /// matters more than it looks: the calibration gate tells the worker that a
+  /// phone without a motion sensor can still run the drill, and falling back to
+  /// [identity] instead would aim the virtual camera at the floor and render an
+  /// empty scene — the app would appear simply broken while claiming to work.
+  ///
+  /// Device axes expressed in world coordinates:
+  ///   X (screen right)      -> ( sin y, -cos y, 0)
+  ///   Y (screen up)         -> ( 0,      0,     1)
+  ///   Z (out of the screen) -> (-cos y, -sin y, 0)
+  static DevicePose upright({
+    double yawRadians = 0,
+    PoseSource source = PoseSource.none,
+    int displayRotationDegrees = 0,
+    Duration timestamp = Duration.zero,
+  }) {
+    final sy = math.sin(yawRadians);
+    final cy = math.cos(yawRadians);
+
+    // Matrix3 is column-major: each triple below is one device axis in world
+    // space. Quaternion.fromRotation then agrees with rotateVector, which is
+    // pinned by quaternion_convention_test.
+    final rotation = Matrix3(
+      sy, -cy, 0, // device X
+      0, 0, 1, // device Y
+      -cy, -sy, 0, // device Z
+    );
+
+    return DevicePose(
+      worldFromDevice: Quaternion.fromRotation(rotation),
+      source: source,
+      displayRotationDegrees: displayRotationDegrees,
+      timestamp: timestamp,
+    );
+  }
 
   /// Rotation taking a vector from the world frame into the device frame.
   ///

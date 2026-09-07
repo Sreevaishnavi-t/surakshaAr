@@ -9,6 +9,7 @@ import '../../data/device_identity.dart';
 import '../../data/repositories.dart';
 import '../../modules/catalogue.dart';
 import '../certificate/certificate_screen.dart';
+import '../diagnostics/diagnostics_screen.dart';
 import '../enrolment/enrolment_screen.dart';
 import '../module/module_screen.dart';
 import '../verify/verify_screen.dart';
@@ -59,6 +60,15 @@ class HomeScreen extends ConsumerWidget {
                             onPressed: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
                                 builder: (_) => const VerifyScreen(),
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.monitor_heart_outlined),
+                            tooltip: 'Diagnostics',
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => const DiagnosticsScreen(),
                               ),
                             ),
                           ),

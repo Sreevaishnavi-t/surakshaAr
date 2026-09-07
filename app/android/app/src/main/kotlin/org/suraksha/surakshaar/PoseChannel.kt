@@ -41,6 +41,15 @@ class PoseChannel(
         private const val EVENT_CHANNEL = "org.suraksha.surakshaar/pose"
         private const val METHOD_CHANNEL = "org.suraksha.surakshaar/pose_meta"
 
+        /**
+         * Raw accelerometer + gyroscope, for the Dart-side Madgwick fallback.
+         *
+         * Only subscribed when neither fused rotation sensor exists, so on the
+         * overwhelming majority of handsets this channel never opens and costs
+         * nothing.
+         */
+        private const val IMU_CHANNEL = "org.suraksha.surakshaar/imu"
+
         const val SOURCE_NONE = 0
         const val SOURCE_GAME_ROTATION_VECTOR = 1
         const val SOURCE_ROTATION_VECTOR = 2
@@ -51,7 +60,10 @@ class PoseChannel(
 
     private var eventChannel: EventChannel? = null
     private var methodChannel: MethodChannel? = null
+    private var imuChannel: EventChannel? = null
     private var sink: EventChannel.EventSink? = null
+
+    private val imuHandler = ImuStreamHandler(sensorManagerProvider = { sensorManager })
 
     private val sensorManager: SensorManager? =
         context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
@@ -65,14 +77,18 @@ class PoseChannel(
     fun attach(messenger: BinaryMessenger) {
         eventChannel = EventChannel(messenger, EVENT_CHANNEL).also { it.setStreamHandler(this) }
         methodChannel = MethodChannel(messenger, METHOD_CHANNEL).also { it.setMethodCallHandler(this) }
+        imuChannel = EventChannel(messenger, IMU_CHANNEL).also { it.setStreamHandler(imuHandler) }
     }
 
     fun detach() {
         stopListening()
+        imuHandler.onCancel(null)
         eventChannel?.setStreamHandler(null)
         methodChannel?.setMethodCallHandler(null)
+        imuChannel?.setStreamHandler(null)
         eventChannel = null
         methodChannel = null
+        imuChannel = null
     }
 
     // ---------------------------------------------------------------- pose stream
@@ -223,6 +239,97 @@ class PoseChannel(
             null
         }
     }
+}
+
+/**
+ * Streams raw accelerometer and gyroscope samples.
+ *
+ * Feeds the Dart-side Madgwick filter on the small number of devices that
+ * expose neither GAME_ROTATION_VECTOR nor ROTATION_VECTOR. Samples are emitted
+ * on each gyroscope event, carrying the most recent accelerometer reading, so
+ * Dart receives one coherent packet per integration step rather than having to
+ * pair two independent streams.
+ *
+ * If the device has no gyroscope at all, accelerometer events drive the stream
+ * with zero rates. That yields tilt without heading — enough to keep the
+ * horizon level, which is a good deal better than a frozen scene.
+ */
+class ImuStreamHandler(
+    private val sensorManagerProvider: () -> SensorManager?,
+) : EventChannel.StreamHandler, SensorEventListener {
+
+    private var sink: EventChannel.EventSink? = null
+    private var accelerometer: Sensor? = null
+    private var gyroscope: Sensor? = null
+
+    private val latestAcceleration = FloatArray(3)
+    private var hasAcceleration = false
+
+    override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+        sink = events
+        val manager = sensorManagerProvider() ?: return
+
+        accelerometer = manager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        gyroscope = manager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+
+        accelerometer?.let { manager.registerListener(this, it, 10_000) }
+        gyroscope?.let { manager.registerListener(this, it, 10_000) }
+    }
+
+    override fun onCancel(arguments: Any?) {
+        sensorManagerProvider()?.unregisterListener(this)
+        accelerometer = null
+        gyroscope = null
+        hasAcceleration = false
+        sink = null
+    }
+
+    override fun onSensorChanged(event: SensorEvent?) {
+        val e = event ?: return
+        val out = sink ?: return
+
+        when (e.sensor.type) {
+            Sensor.TYPE_ACCELEROMETER -> {
+                latestAcceleration[0] = e.values[0]
+                latestAcceleration[1] = e.values[1]
+                latestAcceleration[2] = e.values[2]
+                hasAcceleration = true
+
+                // Only drive the stream from the accelerometer when there is no
+                // gyroscope; otherwise the gyroscope sets the pace.
+                if (gyroscope == null) {
+                    emit(out, 0f, 0f, 0f, e.timestamp)
+                }
+            }
+
+            Sensor.TYPE_GYROSCOPE -> {
+                if (!hasAcceleration) return
+                emit(out, e.values[0], e.values[1], e.values[2], e.timestamp)
+            }
+        }
+    }
+
+    private fun emit(
+        out: EventChannel.EventSink,
+        gx: Float,
+        gy: Float,
+        gz: Float,
+        timestampNs: Long,
+    ) {
+        out.success(
+            listOf(
+                latestAcceleration[0].toDouble(),
+                latestAcceleration[1].toDouble(),
+                latestAcceleration[2].toDouble(),
+                gx.toDouble(),
+                gy.toDouble(),
+                gz.toDouble(),
+                timestampNs.toDouble(),
+            ),
+        )
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 }
 
 /** Thin FlutterPlugin wrapper so the channel is registered with the engine lifecycle. */

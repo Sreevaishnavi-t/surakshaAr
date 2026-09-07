@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../scene/ar_camera.dart';
 import 'device_pose.dart';
+import 'madgwick.dart';
 
 /// What the device can actually do, queried once at startup.
 ///
@@ -69,13 +70,17 @@ class PoseService {
   PoseService({
     EventChannel? poseChannel,
     MethodChannel? metaChannel,
+    EventChannel? imuChannel,
   })  : _poseChannel = poseChannel ?? const EventChannel('org.suraksha.surakshaar/pose'),
-        _metaChannel = metaChannel ?? const MethodChannel('org.suraksha.surakshaar/pose_meta');
+        _metaChannel = metaChannel ?? const MethodChannel('org.suraksha.surakshaar/pose_meta'),
+        _imuChannel = imuChannel ?? const EventChannel('org.suraksha.surakshaar/imu');
 
   final EventChannel _poseChannel;
   final MethodChannel _metaChannel;
+  final EventChannel _imuChannel;
 
   Stream<DevicePose>? _poses;
+  Stream<DevicePose>? _fallbackPoses;
 
   /// Broadcast so the renderer, the scenario step machine and any debug overlay
   /// can all observe without each opening its own sensor registration.
@@ -121,6 +126,62 @@ class PoseService {
     // scenario stays playable with a frozen viewport, so we log and continue.
     debugPrint('PoseService: sensor stream error: $error');
   }
+
+  /// Orientation from raw IMU samples, fused in Dart with [MadgwickAhrs].
+  ///
+  /// Used only when the platform exposes no fused rotation sensor. Android does
+  /// this better in the platform when it can, so this is a genuine fallback
+  /// rather than a preference — but on a handset without it, the difference is
+  /// between AR that tracks and AR that does not.
+  Stream<DevicePose> get fallbackPoses {
+    return _fallbackPoses ??= () {
+      final filter = MadgwickAhrs();
+      double? previousTimestampSeconds;
+
+      return _imuChannel
+          .receiveBroadcastStream()
+          .map<DevicePose?>((event) {
+            if (event is! List || event.length < 7) return null;
+            double at(int i) => (event[i] as num).toDouble();
+
+            final timestampSeconds = at(6) / 1e9;
+            final dt = previousTimestampSeconds == null
+                ? 1 / 100
+                : timestampSeconds - previousTimestampSeconds!;
+            previousTimestampSeconds = timestampSeconds;
+
+            filter.update(
+              ax: at(0),
+              ay: at(1),
+              az: at(2),
+              gx: at(3),
+              gy: at(4),
+              gz: at(5),
+              dt: dt,
+            );
+
+            return DevicePose(
+              worldFromDevice: filter.orientation,
+              source: PoseSource.madgwickFallback,
+              // The activity is portrait-locked, so the display never leaves
+              // its natural rotation.
+              displayRotationDegrees: 0,
+              timestamp: Duration(microseconds: (timestampSeconds * 1e6).round()),
+            );
+          })
+          .where((pose) => pose != null)
+          .cast<DevicePose>()
+          .handleError(_onStreamError)
+          .asBroadcastStream();
+    }();
+  }
+
+  /// The best orientation stream this device can provide.
+  ///
+  /// Picks the platform's fused sensor when present and the Dart filter when
+  /// not, so callers never have to branch on hardware.
+  Stream<DevicePose> streamFor(PoseCapabilities capabilities) =>
+      capabilities.supportsWorldLocking ? poses : fallbackPoses;
 
   Future<PoseCapabilities> capabilities() async {
     try {

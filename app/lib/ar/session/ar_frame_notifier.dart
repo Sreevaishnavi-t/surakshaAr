@@ -29,13 +29,28 @@ class ArFrameNotifier extends ChangeNotifier {
 
   StreamSubscription<DevicePose>? _poseSubscription;
 
-  DevicePose _pose = DevicePose.identity;
+  /// Falls back to an upright phone rather than the identity orientation.
+  ///
+  /// Identity points the rear camera at the floor, which culls the entire scene
+  /// and makes the app look broken on a device whose sensors have not reported
+  /// yet — or do not exist at all.
+  DevicePose _pose = DevicePose.upright();
   Duration _elapsed = Duration.zero;
   Duration _pausedAt = Duration.zero;
   bool _paused = false;
   int _sampleCount = 0;
 
+  /// Current orientation.
+  ///
+  /// Until a real sample arrives this is a synthetic upright pose, so content
+  /// is visible and the drill is playable. [hasPose] says which it is, and the
+  /// HUD surfaces that to the worker rather than pretending to track.
   DevicePose get pose => _pose;
+
+  /// Total pose samples received. Exposed for the diagnostics screen, where
+  /// "camera works but nothing appears" needs to be distinguishable from
+  /// "sensors are silent".
+  int get sampleCount => _sampleCount;
 
   /// Time since [start], excluding any paused spans. Everything visual and every
   /// scoring timer reads from this one clock, so a replay is reproducible.
@@ -50,8 +65,17 @@ class ArFrameNotifier extends ChangeNotifier {
 
   PoseSource get source => _pose.source;
 
-  Future<void> start() async {
-    _poseSubscription ??= _poseService.poses.listen(
+  /// Begins the frame clock and subscribes to the best available pose source.
+  ///
+  /// [capabilities] decides between the platform's fused sensor and the Dart
+  /// Madgwick fallback. Passing null uses the platform stream, which is the
+  /// right default when capabilities could not be queried.
+  Future<void> start({PoseCapabilities? capabilities}) async {
+    final stream = capabilities == null
+        ? _poseService.poses
+        : _poseService.streamFor(capabilities);
+
+    _poseSubscription ??= stream.listen(
       (pose) {
         _pose = pose;
         _sampleCount++;

@@ -8,6 +8,7 @@ import '../../ar/pose/pose_service.dart';
 import '../../ar/scene/ar_camera.dart';
 import '../../ar/scene/ar_renderer.dart';
 import '../../ar/session/ar_frame_notifier.dart';
+import '../../core/diagnostics.dart';
 import '../../core/theme/app_theme.dart';
 import '../../modules/catalogue.dart';
 import '../../modules/act_registry.dart';
@@ -76,8 +77,19 @@ class _ArSessionScreenState extends State<ArSessionScreen>
   }
 
   Future<void> _prepare() async {
+    final diagnostics = Diagnostics.instance;
+    diagnostics.breadcrumb('ar.prepare.begin domain=${widget.domain.name}');
+
     final capabilities = await _poseService.capabilities();
+    diagnostics.breadcrumb(
+      'ar.capabilities game=${capabilities.hasGameRotationVector} '
+      'rot=${capabilities.hasRotationVector} '
+      'gyro=${capabilities.hasGyroscope} '
+      'accel=${capabilities.hasAccelerometer}',
+    );
+
     final intrinsics = await _poseService.cameraIntrinsics();
+    diagnostics.breadcrumb('ar.intrinsics measured=${intrinsics.isMeasured}');
     if (!mounted) return;
 
     setState(() {
@@ -85,10 +97,19 @@ class _ArSessionScreenState extends State<ArSessionScreen>
       _intrinsics = intrinsics;
     });
 
+    diagnostics.breadcrumb('ar.camera.init.begin');
     await _cameraController.initialise();
+    diagnostics.breadcrumb(
+      'ar.camera.init.done failure=${_cameraController.failure} '
+      'preview=${_cameraController.displayPreviewSize}',
+    );
     if (!mounted) return;
 
-    await _frames.start();
+    diagnostics.breadcrumb(
+      'ar.pose.stream.begin fallback=${!capabilities.supportsWorldLocking}',
+    );
+    await _frames.start(capabilities: capabilities);
+    diagnostics.breadcrumb('ar.pose.stream.started');
     if (!mounted) return;
 
     setState(() {
@@ -108,6 +129,10 @@ class _ArSessionScreenState extends State<ArSessionScreen>
 
   /// Pins the scenario's authoring "forward" to the worker's current heading.
   void _calibrate() {
+    Diagnostics.instance.breadcrumb(
+      'ar.calibrate yaw=${_frames.pose.yaw.toStringAsFixed(3)} '
+      'source=${_frames.pose.source.name} samples=${_frames.sampleCount}',
+    );
     setState(() {
       _worldFromScene = ArCamera.calibrationFromYaw(_frames.pose.yaw);
       _phase = _SessionPhase.running;
