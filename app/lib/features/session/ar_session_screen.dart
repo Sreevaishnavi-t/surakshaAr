@@ -238,7 +238,9 @@ class _ArSessionScreenState extends State<ArSessionScreen>
             if (_phase == _SessionPhase.finished && _scenario.result != null)
               ScenarioResultSheet(
                 result: _scenario.result!,
-                onDone: () => Navigator.of(context).maybePop(),
+                // Hand the result back so the module screen can record it.
+                // Every attempt is kept, passes and failures alike.
+                onDone: () => Navigator.of(context).pop(_scenario.result),
               ),
 
             if (!_intrinsics.isMeasured && _phase == _SessionPhase.running)
@@ -282,7 +284,7 @@ class _ArSessionScreenState extends State<ArSessionScreen>
     if (!mounted) return;
     if (leave ?? false) {
       _scenario.abandon();
-      if (mounted) Navigator.of(context).maybePop();
+      if (mounted) Navigator.of(context).pop(_scenario.result);
     } else {
       _frames.resume(_frames.elapsed);
     }

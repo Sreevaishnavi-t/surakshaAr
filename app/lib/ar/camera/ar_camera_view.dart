@@ -21,11 +21,16 @@ class ArCameraController extends ChangeNotifier with WidgetsBindingObserver {
   ArCameraController();
 
   CameraController? _controller;
+  CameraDescription? _description;
   CameraFailure? _failure;
   bool _initialising = false;
   bool _disposed = false;
 
   CameraController? get controller => _controller;
+
+  /// The selected camera. Needed to work out frame rotation for ML Kit.
+  CameraDescription? get description => _description;
+
   CameraFailure? get failure => _failure;
   bool get isReady => _controller?.value.isInitialized ?? false;
 
@@ -65,7 +70,11 @@ class ArCameraController extends ChangeNotifier with WidgetsBindingObserver {
         // overlay needs far more than the passthrough does.
         ResolutionPreset.medium,
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.yuv420,
+        // NV21 rather than YUV420 so ML Kit gets a single contiguous plane.
+        // YUV420 would mean interleaving three planes by hand with per-device
+        // row and pixel strides — a well-known source of frames that look fine
+        // in the preview but detect nothing.
+        imageFormatGroup: ImageFormatGroup.nv21,
       );
 
       await controller.initialize();
@@ -79,6 +88,7 @@ class ArCameraController extends ChangeNotifier with WidgetsBindingObserver {
       await controller.lockCaptureOrientation(DeviceOrientation.portraitUp);
 
       _controller = controller;
+      _description = rear;
       _failure = null;
     } on CameraException catch (e) {
       debugPrint('ArCameraController: ${e.code} ${e.description}');

@@ -30,6 +30,9 @@ dependencies:
   # Certificates
   cryptography: ^2.7.0
   qr_flutter: ^4.1.0
+  # Backs the device signing key with the Android Keystore rather than leaving
+  # a private key readable in app storage.
+  flutter_secure_storage: ^9.2.4
 
   # Misc
   permission_handler: ^11.3.1
