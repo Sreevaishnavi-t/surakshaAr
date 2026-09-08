@@ -47,6 +47,9 @@ class ArScenePainter extends CustomPainter {
   /// GPU-side failure would land, and it is otherwise invisible in a crash log.
   static bool _loggedFirstPaint = false;
 
+  /// Set once per process, alongside [_loggedFirstPaint].
+  static bool _traceFirstFrame = true;
+
   @override
   void paint(Canvas canvas, Size size) {
     final visible = <_DrawItem>[];
@@ -84,7 +87,25 @@ class ArScenePainter extends CustomPainter {
       );
     }
 
+    // On the very first frame only, bracket each node's draw with a synchronous
+    // breadcrumb. A native GPU fault kills the process without a Dart exception,
+    // so the only way to learn *which* node caused it is to have written its id
+    // to disk before the draw began: after a crash, the last 'ar.node.begin'
+    // with no matching 'ar.node.done' names the culprit exactly.
+    final trace = _traceFirstFrame;
+    _traceFirstFrame = false;
+
     for (final item in visible) {
+      if (trace) {
+        Diagnostics.instance.breadcrumb(
+          'ar.node.begin ${item.node.id} '
+          'depth=${item.projected.depth.toStringAsFixed(2)} '
+          'scale=${item.projected.scale.toStringAsFixed(0)} '
+          'at=${item.projected.screen.dx.toStringAsFixed(0)},'
+          '${item.projected.screen.dy.toStringAsFixed(0)}',
+        );
+      }
+
       final ctx = NodeRenderContext(
         depth: item.projected.depth,
         pixelsPerMetre: item.projected.scale,
@@ -101,7 +122,11 @@ class ArScenePainter extends CustomPainter {
       canvas.scale(item.projected.scale);
       item.node.paint(canvas, ctx);
       canvas.restore();
+
+      if (trace) Diagnostics.instance.breadcrumb('ar.node.done ${item.node.id}');
     }
+
+    if (trace) Diagnostics.instance.breadcrumb('ar.render.first.complete');
   }
 
   double _atmosphericOpacity(double depth) {

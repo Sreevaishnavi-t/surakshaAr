@@ -17,7 +17,14 @@ import 'widgets/scenario_hud.dart';
 import 'widgets/session_gates.dart';
 
 /// Where the session currently is.
-enum _SessionPhase { preparing, needsCamera, unsupported, calibrating, running, finished }
+enum _SessionPhase {
+  preparing,
+  needsCamera,
+  unsupported,
+  calibrating,
+  running,
+  finished,
+}
 
 /// Hosts one AR act: camera passthrough, pose tracking, scene rendering and the
 /// scenario's own step logic.
@@ -55,6 +62,13 @@ class _ArSessionScreenState extends State<ArSessionScreen>
   Quaternion? _worldFromScene;
 
   double _calibrationScale = 1.0;
+
+  /// Draw the camera only, with no scene layer.
+  ///
+  /// A diagnostic bisect, not a feature: it separates "the renderer kills the
+  /// process" from "the camera or platform below it does", which is otherwise
+  /// impossible to tell apart from a device with no debugger attached.
+  bool _safeMode = false;
 
   /// Latest laid-out viewport, captured so [_pumpScenario] can construct a
   /// camera outside of build.
@@ -99,9 +113,13 @@ class _ArSessionScreenState extends State<ArSessionScreen>
 
     diagnostics.breadcrumb('ar.camera.init.begin');
     await _cameraController.initialise();
+    final preview = _cameraController.displayPreviewSize;
     diagnostics.breadcrumb(
       'ar.camera.init.done failure=${_cameraController.failure} '
-      'preview=${_cameraController.displayPreviewSize}',
+      // Interpolating the Size itself printed "Instance of 'Size'": release
+      // builds strip dart:ui toString implementations, so the one number that
+      // mattered was the one the log could not show.
+      'preview=${preview == null ? 'null' : '${preview.width.toStringAsFixed(0)}x${preview.height.toStringAsFixed(0)}'}',
     );
     if (!mounted) return;
 
@@ -186,9 +204,9 @@ class _ArSessionScreenState extends State<ArSessionScreen>
     if (result != null) _completedActs.add(result);
 
     if (!_hasMoreActs) {
-      Navigator.of(context).pop(
-        combineActs(domain: widget.domain, acts: _completedActs),
-      );
+      Navigator.of(
+        context,
+      ).pop(combineActs(domain: widget.domain, acts: _completedActs));
       return;
     }
 
@@ -223,15 +241,15 @@ class _ArSessionScreenState extends State<ArSessionScreen>
       body: switch (_phase) {
         _SessionPhase.preparing => const SessionLoadingGate(),
         _SessionPhase.needsCamera => SessionCameraGate(
-            onRetry: () {
-              setState(() => _phase = _SessionPhase.preparing);
-              _prepare();
-            },
-            onExit: () => Navigator.of(context).maybePop(),
-          ),
+          onRetry: () {
+            setState(() => _phase = _SessionPhase.preparing);
+            _prepare();
+          },
+          onExit: () => Navigator.of(context).maybePop(),
+        ),
         _SessionPhase.unsupported => SessionUnsupportedGate(
-            onExit: () => Navigator.of(context).maybePop(),
-          ),
+          onExit: () => Navigator.of(context).maybePop(),
+        ),
         _ => _buildArStack(),
       },
     );
@@ -248,63 +266,87 @@ class _ArSessionScreenState extends State<ArSessionScreen>
           children: [
             ArCameraPreview(controller: _cameraController),
 
-            // One AnimatedBuilder around everything pose-driven, so a frame
-            // rebuilds this subtree only — not the gates, not the scaffold.
-            AnimatedBuilder(
-              animation: _frames,
-              builder: (context, _) {
-                final pose = _frames.pose;
-                final camera = _cameraFor(viewport, pose);
+            // Safe mode draws the camera and nothing else. If the drill is
+            // stable here but dies with the scene on, the fault is in the
+            // renderer; if it dies either way, it is the camera or the
+            // platform below it. One tap, one bit of information.
+            if (!_safeMode)
+              // One AnimatedBuilder around everything pose-driven, so a frame
+              // rebuilds this subtree only — not the gates, not the scaffold.
+              AnimatedBuilder(
+                animation: _frames,
+                builder: (context, _) {
+                  final pose = _frames.pose;
+                  final camera = _cameraFor(viewport, pose);
 
-                return Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    ArSceneView(
-                      camera: camera,
-                      nodes: _scenario.nodes,
-                      elapsed: _frames.elapsed,
-                      onNodeTap: _phase == _SessionPhase.running
-                          ? _scenario.handleTap
-                          : null,
-                      onEmptyTap: _phase == _SessionPhase.running
-                          ? (_) => _scenario.handleEmptyTap()
-                          : null,
-                      onDrag: _phase == _SessionPhase.running
-                          ? _scenario.handleDrag
-                          : null,
-                      onPressStart: _phase == _SessionPhase.running
-                          ? _scenario.handlePressStart
-                          : null,
-                      onPressEnd: _phase == _SessionPhase.running
-                          ? _scenario.handlePressEnd
-                          : null,
-                    ),
+                  return Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      ArSceneView(
+                        camera: camera,
+                        nodes: _scenario.nodes,
+                        elapsed: _frames.elapsed,
+                        onNodeTap: _phase == _SessionPhase.running
+                            ? _scenario.handleTap
+                            : null,
+                        onEmptyTap: _phase == _SessionPhase.running
+                            ? (_) => _scenario.handleEmptyTap()
+                            : null,
+                        onDrag: _phase == _SessionPhase.running
+                            ? _scenario.handleDrag
+                            : null,
+                        onPressStart: _phase == _SessionPhase.running
+                            ? _scenario.handlePressStart
+                            : null,
+                        onPressEnd: _phase == _SessionPhase.running
+                            ? _scenario.handlePressEnd
+                            : null,
+                      ),
 
-                    // Haze sits above the scene: it is the worker's own loss of
-                    // visibility, not an object at some depth in the world.
-                    IgnorePointer(
-                      child: CustomPaint(
-                        size: Size.infinite,
-                        painter: SmokeHazePainter(
-                          density: _phase == _SessionPhase.running
-                              ? _scenario.hazeDensity
-                              : 0,
-                          seconds: _frames.elapsed.inMilliseconds / 1000.0,
+                      // Haze sits above the scene: it is the worker's own loss of
+                      // visibility, not an object at some depth in the world.
+                      IgnorePointer(
+                        child: CustomPaint(
+                          size: Size.infinite,
+                          painter: SmokeHazePainter(
+                            density: _phase == _SessionPhase.running
+                                ? _scenario.hazeDensity
+                                : 0,
+                            seconds: _frames.elapsed.inMilliseconds / 1000.0,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
-                );
-              },
-            ),
+                    ],
+                  );
+                },
+              ),
 
-            if (_phase == _SessionPhase.calibrating)
+            if (_phase == _SessionPhase.calibrating) ...[
               SessionCalibrationGate(
                 capabilities: _capabilities,
                 intrinsicsAreMeasured: _intrinsics.isMeasured,
                 onBegin: _calibrate,
                 onExit: () => Navigator.of(context).maybePop(),
               ),
+              Positioned(
+                right: 12,
+                top: 12,
+                child: SafeArea(
+                  child: FilterChip(
+                    label: Text(_safeMode ? 'Safe mode: on' : 'Safe mode'),
+                    selected: _safeMode,
+                    avatar: Icon(
+                      _safeMode ? Icons.healing : Icons.bug_report_outlined,
+                      size: 18,
+                    ),
+                    onSelected: (value) {
+                      Diagnostics.instance.breadcrumb('ar.safeMode=$value');
+                      setState(() => _safeMode = value);
+                    },
+                  ),
+                ),
+              ),
+            ],
 
             if (_phase == _SessionPhase.running)
               AnimatedBuilder(
@@ -350,9 +392,7 @@ class _ArSessionScreenState extends State<ArSessionScreen>
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Leave this drill?'),
-        content: const Text(
-          'Your progress in this drill will not be counted.',
-        ),
+        content: const Text('Your progress in this drill will not be counted.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
