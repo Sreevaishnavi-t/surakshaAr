@@ -32,3 +32,6 @@ keys/
 # OS
 .DS_Store
 Thumbs.db
+
+# Binaries
+*.apk

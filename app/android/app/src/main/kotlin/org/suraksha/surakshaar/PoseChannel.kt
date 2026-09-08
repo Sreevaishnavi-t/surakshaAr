@@ -7,9 +7,12 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.hardware.display.DisplayManager
 import android.os.Build
 import android.util.SizeF
+import android.view.Display
 import android.view.Surface
+import android.view.WindowManager
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
@@ -136,20 +139,24 @@ class PoseChannel(
             return
         }
 
-        // Yields [w, x, y, z] in the Android world frame (device -> world).
-        SensorManager.getQuaternionFromVector(quaternion, e.values)
+        try {
+            // Yields [w, x, y, z] in the Android world frame (device -> world).
+            SensorManager.getQuaternionFromVector(quaternion, e.values)
 
-        out.success(
-            listOf(
-                quaternion[0].toDouble(), // w
-                quaternion[1].toDouble(), // x
-                quaternion[2].toDouble(), // y
-                quaternion[3].toDouble(), // z
-                activeSource.toDouble(),
-                displayRotationDegrees().toDouble(),
-                e.timestamp.toDouble(), // nanoseconds, monotonic
-            ),
-        )
+            out.success(
+                listOf(
+                    quaternion[0].toDouble(), // w
+                    quaternion[1].toDouble(), // x
+                    quaternion[2].toDouble(), // y
+                    quaternion[3].toDouble(), // z
+                    activeSource.toDouble(),
+                    displayRotationDegrees().toDouble(),
+                    e.timestamp.toDouble(), // nanoseconds, monotonic
+                ),
+            )
+        } catch (_: Throwable) {
+            // Never let an uncaught exception on the sensor thread crash the app process.
+        }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
@@ -160,12 +167,17 @@ class PoseChannel(
      * landscape on some tablets, and getting it wrong tilts the whole scene 90°.
      */
     private fun displayRotationDegrees(): Int {
-        val rotation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            context.display?.rotation
-        } else {
-            @Suppress("DEPRECATION")
-            (context.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager)
-                ?.defaultDisplay?.rotation
+        val rotation = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val dm = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+                dm?.getDisplay(Display.DEFAULT_DISPLAY)?.rotation
+            } else {
+                @Suppress("DEPRECATION")
+                (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)
+                    ?.defaultDisplay?.rotation
+            }
+        } catch (_: Throwable) {
+            null
         }
         return when (rotation) {
             Surface.ROTATION_90 -> 90
@@ -288,24 +300,28 @@ class ImuStreamHandler(
         val e = event ?: return
         val out = sink ?: return
 
-        when (e.sensor.type) {
-            Sensor.TYPE_ACCELEROMETER -> {
-                latestAcceleration[0] = e.values[0]
-                latestAcceleration[1] = e.values[1]
-                latestAcceleration[2] = e.values[2]
-                hasAcceleration = true
+        try {
+            when (e.sensor.type) {
+                Sensor.TYPE_ACCELEROMETER -> {
+                    latestAcceleration[0] = e.values[0]
+                    latestAcceleration[1] = e.values[1]
+                    latestAcceleration[2] = e.values[2]
+                    hasAcceleration = true
 
-                // Only drive the stream from the accelerometer when there is no
-                // gyroscope; otherwise the gyroscope sets the pace.
-                if (gyroscope == null) {
-                    emit(out, 0f, 0f, 0f, e.timestamp)
+                    // Only drive the stream from the accelerometer when there is no
+                    // gyroscope; otherwise the gyroscope sets the pace.
+                    if (gyroscope == null) {
+                        emit(out, 0f, 0f, 0f, e.timestamp)
+                    }
+                }
+
+                Sensor.TYPE_GYROSCOPE -> {
+                    if (!hasAcceleration) return
+                    emit(out, e.values[0], e.values[1], e.values[2], e.timestamp)
                 }
             }
-
-            Sensor.TYPE_GYROSCOPE -> {
-                if (!hasAcceleration) return
-                emit(out, e.values[0], e.values[1], e.values[2], e.timestamp)
-            }
+        } catch (_: Throwable) {
+            // Guard against uncaught exceptions
         }
     }
 
