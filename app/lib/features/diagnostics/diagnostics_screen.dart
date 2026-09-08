@@ -6,6 +6,7 @@ import '../../ar/camera/ar_camera_view.dart';
 import '../../ar/pose/pose_service.dart';
 import '../../ar/scene/ar_camera.dart';
 import '../../core/diagnostics.dart';
+import '../../core/exit_reasons.dart';
 import '../../core/services.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/device_identity.dart';
@@ -28,6 +29,7 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
   PoseCapabilities? _capabilities;
   ArCameraIntrinsics? _intrinsics;
   String? _cameraProbe;
+  List<ProcessExit> _exits = const [];
   bool _probing = true;
 
   @override
@@ -57,6 +59,10 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
       Diagnostics.instance.record('diag.intrinsics failed: $e');
     }
 
+    // Android's own record of why previous processes died. Ground truth, and
+    // the reason this screen exists rather than a logcat session.
+    final exits = await ExitReasonService().recent();
+
     final controller = ArCameraController();
     try {
       await controller.initialise();
@@ -75,6 +81,7 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
       _capabilities = capabilities;
       _intrinsics = intrinsics;
       _cameraProbe = cameraProbe;
+      _exits = exits;
       _probing = false;
     });
   }
@@ -138,6 +145,20 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
                 const _SectionHeader('Device capability'),
                 for (final entry in _environment.entries)
                   _KeyValueRow(label: entry.key, value: '${entry.value}'),
+
+                if (_exits.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  const _SectionHeader('Why the app closed last time'),
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      "Recorded by Android itself, not by this app. This is the "
+                      'part a breadcrumb trail cannot tell you.',
+                      style: TextStyle(fontSize: 13, height: 1.35),
+                    ),
+                  ),
+                  for (final exit in _exits.take(4)) _ExitCard(exit: exit),
+                ],
 
                 if (diagnostics.previousRun.isNotEmpty) ...[
                   const SizedBox(height: 20),
@@ -270,4 +291,113 @@ class _LogBlock extends StatelessWidget {
       ),
     );
   }
+}
+
+/// One recorded process death, as Android described it.
+class _ExitCard extends StatelessWidget {
+  const _ExitCard({required this.exit});
+
+  final ProcessExit exit;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final serious = !exit.isBenign;
+    final accent = serious ? AppTheme.hazardRed : theme.colorScheme.outline;
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: accent.withValues(alpha: 0.55)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                serious ? Icons.report_problem_outlined : Icons.check_circle_outline,
+                size: 18,
+                color: accent,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  exit.reason,
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '${exit.when.toIso8601String().substring(0, 19)}  ·  '
+            '${exit.memorySummary}',
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 11.5),
+          ),
+          if (exit.description != null && exit.description!.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            SelectableText(
+              exit.description!,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 11.5),
+            ),
+          ],
+          // What this exit means for the bug being chased, in plain words.
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              verdictFor(exit),
+              style: theme.textTheme.bodySmall?.copyWith(height: 1.35),
+            ),
+          ),
+          if (exit.trace != null && exit.trace!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: EdgeInsets.zero,
+              title: const Text('Tombstone / trace', style: TextStyle(fontSize: 13)),
+              children: [
+                SelectableText(
+                  exit.trace!,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 10.5),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Turns a recorded process death into a one-line verdict a non-specialist can
+/// act on — the difference between "Android ran out of memory and killed us"
+/// and "our own native code took a fatal signal" decides where to look next,
+/// and the raw reason code says neither.
+///
+/// TODO(human): implement this.
+///
+/// Return a short sentence for each case that matters:
+///   - exit.isLowMemory  -> the kernel reclaimed us; point at exit.memorySummary
+///                          and say the fix is to allocate less, not to catch
+///                          anything. Note that PSS above roughly 400 MB on a
+///                          mid-range handset is already the answer.
+///   - exit.isNativeCrash -> a fatal signal in native code. Say the tombstone
+///                          below names the faulting library, and that this
+///                          rules out every Dart-level explanation.
+///   - exit.isAnr        -> the main thread blocked past the watchdog. Point at
+///                          the trace for what it was blocked on.
+///   - exit.isBenign     -> the user closed it; nothing to investigate.
+///   - anything else     -> say plainly that it is not yet diagnosable and the
+///                          tombstone, if present, is the next thing to read.
+///
+/// Keep it to one or two sentences per case: this renders on a phone, and it is
+/// read by whoever is holding it rather than by someone with a debugger.
+String verdictFor(ProcessExit exit) {
+  return '';
 }

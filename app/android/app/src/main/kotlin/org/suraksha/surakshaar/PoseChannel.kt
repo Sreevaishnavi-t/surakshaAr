@@ -335,13 +335,18 @@ class ImuStreamHandler(
 /** Thin FlutterPlugin wrapper so the channel is registered with the engine lifecycle. */
 class PosePlugin : FlutterPlugin {
     private var channel: PoseChannel? = null
+    private var exitReasons: ExitReasonChannel? = null
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel = PoseChannel(binding.applicationContext).also { it.attach(binding.binaryMessenger) }
+        exitReasons = ExitReasonChannel(binding.applicationContext)
+            .also { it.attach(binding.binaryMessenger) }
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel?.detach()
         channel = null
+        exitReasons?.detach()
+        exitReasons = null
     }
 }
