@@ -29,14 +29,16 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.5'   # latest stable ≥ 3.24 that has Dart 3.5+
+          flutter-version: '3.47.2'   # requires Dart 3.12.x to satisfy sdk: ^3.12.2
           channel: stable
           cache: true
 
       # ── 4. Dependencies ────────────────────────────────────────────────────
       - name: Install Flutter dependencies
         working-directory: app
-        run: flutter pub get
+        run: |
+          flutter config --no-analytics
+          flutter pub get
 
       # ── 5. Code generation (l10n) ──────────────────────────────────────────
       #   The app uses flutter_localizations with generate: true, so the ARB
