@@ -60,7 +60,11 @@ class Diagnostics {
     // Catches asynchronous errors that never reach a Dart zone handler.
     PlatformDispatcher.instance.onError = (error, stack) {
       record('UNCAUGHT: $error', stackTrace: stack);
-      return false;
+      // Return true: the error has been recorded. Returning false would tell
+      // the Flutter engine the error is *unhandled*, which re-throws it,
+      // crashes the Dart isolate, and terminates the process — Android records
+      // that as REASON_CRASH (Java/Kotlin exception) with description "crash".
+      return true;
     };
 
     try {
