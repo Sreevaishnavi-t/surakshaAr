@@ -3,6 +3,8 @@ import 'dart:ui';
 
 import 'package:vector_math/vector_math_64.dart';
 
+import 'ar_camera.dart';
+
 /// Everything a node needs in order to draw itself for one frame.
 ///
 /// The canvas handed to a node is already translated to the node's projected
@@ -100,8 +102,86 @@ abstract class SceneNode {
   /// per metre, Y increasing downward as usual for canvas space.
   void paint(Canvas canvas, NodeRenderContext ctx);
 
+  /// Whether this node opts out of the renderer's screen-margin cull.
+  ///
+  /// False for billboards, whose extent is bounded by [hitRadiusMetres].
+  bool get bypassesScreenCull => false;
+
   /// Per-frame state update. Default is a no-op; particle systems override it.
   void update(Duration elapsed) {}
+}
+
+/// A node whose shape is defined in world space and projected per vertex.
+///
+/// The ordinary [SceneNode] is a billboard: one point is projected and the node
+/// draws flat around it at a scale set by depth. That is right for a fire, a
+/// sign or an extinguisher, all of which face the viewer. It cannot draw a
+/// wall, because a wall *recedes* — its near edge is large and its far edge
+/// small, and no single scale factor expresses that.
+///
+/// Nodes of this kind therefore paint in screen space with the camera in hand,
+/// projecting each corner separately. That is what gives a tunnel real
+/// perspective, and it is what makes a simulated gallery read as a place the
+/// worker is standing inside rather than a picture hung in front of them.
+abstract class ProjectedSceneNode extends SceneNode {
+  ProjectedSceneNode({
+    required super.id,
+    required super.position,
+    super.hitRadiusMetres,
+    super.visible,
+    super.interactive,
+    super.sortBias,
+  });
+
+  /// Extent is large and often surrounds the camera, so the renderer's
+  /// screen-margin cull would wrongly discard geometry whose centre happens to
+  /// be off screen — the near wall of a tunnel being the obvious case.
+  @override
+  bool get bypassesScreenCull => true;
+
+  /// Never called; [paintProjected] is used instead.
+  @override
+  void paint(Canvas canvas, NodeRenderContext ctx) {}
+
+  /// Draws in **screen space**. Use [ArCamera.projectWorld] or the helpers in
+  /// [ProjectedRenderContext] to turn world points into pixels.
+  void paintProjected(Canvas canvas, ProjectedRenderContext ctx);
+}
+
+/// What a [ProjectedSceneNode] gets to draw with.
+class ProjectedRenderContext {
+  const ProjectedRenderContext({
+    required this.camera,
+    required this.elapsed,
+    required this.viewportSize,
+  });
+
+  final ArCamera camera;
+  final Duration elapsed;
+  final Size viewportSize;
+
+  double get seconds => elapsed.inMicroseconds / 1e6;
+
+  /// Projects a scene-space point to a pixel, or null if it is behind the
+  /// camera. Returning null rather than clamping is deliberate: a polygon with
+  /// one vertex behind the viewer cannot be drawn correctly without clipping in
+  /// 3D, and a clamped vertex produces a wild streak across the screen.
+  Offset? project(Vector3 scenePoint) => camera.project(scenePoint)?.screen;
+
+  /// Projects a whole ring of points, giving up if any vertex is behind the
+  /// camera.
+  List<Offset>? projectAll(List<Vector3> scenePoints) {
+    final out = <Offset>[];
+    for (final point in scenePoints) {
+      final projected = camera.project(point);
+      if (projected == null) return null;
+      out.add(projected.screen);
+    }
+    return out;
+  }
+
+  /// Depth in metres, for fog and draw ordering.
+  double? depthOf(Vector3 scenePoint) => camera.project(scenePoint)?.depth;
 }
 
 /// Places a node by bearing and distance rather than raw coordinates.

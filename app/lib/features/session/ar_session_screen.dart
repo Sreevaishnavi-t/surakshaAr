@@ -6,9 +6,12 @@ import '../../ar/fx/fire_fx.dart';
 import '../../ar/pose/device_pose.dart';
 import '../../ar/pose/pose_service.dart';
 import '../../ar/scene/ar_camera.dart';
+import '../../ar/scene/scene_graph.dart';
 import '../../ar/scene/ar_renderer.dart';
 import '../../ar/session/ar_frame_notifier.dart';
 import '../../ar/environment/environment_map.dart';
+import '../../ar/world/gallery_layout.dart';
+import '../../ar/world/gallery_nodes.dart';
 import '../../ar/environment/scene_scanner.dart';
 import '../../core/diagnostics.dart';
 import '../../core/theme/app_theme.dart';
@@ -58,6 +61,14 @@ class _ArSessionScreenState extends State<ArSessionScreen>
   /// What the app has worked out about the room, built during the scan sweep.
   final EnvironmentMap _environment = EnvironmentMap();
   late final SceneScanner _scanner = SceneScanner(map: _environment);
+
+  /// The simulated gallery the drill takes place inside.
+  ///
+  /// Held by the session rather than by each scenario, because every module
+  /// happens underground and none of them should have to rebuild a tunnel. The
+  /// scenario contributes what is *happening*; this is where it happens.
+  GalleryLayout? _gallery;
+  List<SceneNode> _galleryNodes = const [];
 
   late final ArFrameNotifier _frames;
 
@@ -178,8 +189,21 @@ class _ArSessionScreenState extends State<ArSessionScreen>
       'doors=${_environment.doors.length}',
     );
 
+    // Build the gallery to fit what was measured, before the scenario places
+    // anything into it.
+    final gallery = GalleryLayout.fit(
+      map: _environment,
+      eyeHeightMetres: _environment.ground.cameraHeightMetres,
+    );
+
     setState(() {
       _worldFromScene = ArCamera.calibrationFromYaw(_frames.pose.yaw);
+      _gallery = gallery;
+      _galleryNodes = [
+        MineGalleryNode(id: 'gallery', layout: gallery),
+        MineRailsNode(id: 'gallery.rails', layout: gallery),
+        GalleryPortalNode(id: 'gallery.portal', layout: gallery),
+      ];
       _phase = _SessionPhase.running;
     });
 
@@ -320,7 +344,9 @@ class _ArSessionScreenState extends State<ArSessionScreen>
                     children: [
                       ArSceneView(
                         camera: camera,
-                        nodes: _scenario.nodes,
+                        // Gallery first so it sorts behind everything else; the
+                        // scenario's own content lives inside it.
+                        nodes: [..._galleryNodes, ..._scenario.nodes],
                         elapsed: _frames.elapsed,
                         onNodeTap: _phase == _SessionPhase.running
                             ? _scenario.handleTap
@@ -384,6 +410,48 @@ class _ArSessionScreenState extends State<ArSessionScreen>
                 ),
               ),
             ],
+
+            // An unfitted gallery uses standard dimensions and can therefore
+            // pass through a real wall. Say so rather than letting a worker
+            // walk into one.
+            if (_phase == _SessionPhase.running &&
+                _gallery != null &&
+                !_gallery!.fittedToRoom)
+              Positioned(
+                left: 16,
+                right: 16,
+                top: 12,
+                child: SafeArea(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.cautionAmber.withValues(alpha: 0.92),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.warning_amber_rounded,
+                            size: 20, color: Colors.black87),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'The room was not scanned, so this gallery may not '
+                            'match your surroundings. Watch your step.',
+                            style: TextStyle(
+                              color: Colors.black87,
+                              fontSize: 13,
+                              height: 1.3,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
 
             if (_phase == _SessionPhase.running)
               AnimatedBuilder(

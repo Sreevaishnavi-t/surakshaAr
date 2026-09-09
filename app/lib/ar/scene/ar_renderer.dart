@@ -59,14 +59,18 @@ class ArScenePainter extends CustomPainter {
       final projected = camera.project(node.position);
       if (projected == null) continue; // Behind the camera.
 
-      final radiusPixels = node.hitRadiusMetres * projected.scale;
-      final margin = cullMarginPixels + radiusPixels;
-      final p = projected.screen;
-      if (p.dx < -margin ||
-          p.dy < -margin ||
-          p.dx > size.width + margin ||
-          p.dy > size.height + margin) {
-        continue;
+      // Geometry nodes surround the camera, so a centre that lands off screen
+      // says nothing about whether the shape is visible.
+      if (!node.bypassesScreenCull) {
+        final radiusPixels = node.hitRadiusMetres * projected.scale;
+        final margin = cullMarginPixels + radiusPixels;
+        final p = projected.screen;
+        if (p.dx < -margin ||
+            p.dy < -margin ||
+            p.dx > size.width + margin ||
+            p.dy > size.height + margin) {
+          continue;
+        }
       }
 
       visible.add(_DrawItem(node, projected, camera.angleTo(node.position)));
@@ -106,22 +110,39 @@ class ArScenePainter extends CustomPainter {
         );
       }
 
-      final ctx = NodeRenderContext(
-        depth: item.projected.depth,
-        pixelsPerMetre: item.projected.scale,
-        elapsed: elapsed,
-        atmosphericOpacity: _atmosphericOpacity(item.projected.depth),
-        viewportSize: size,
-        screenPosition: item.projected.screen,
-        angleFromCentre: item.angle,
-      );
+      final node = item.node;
 
-      canvas.save();
-      canvas.translate(item.projected.screen.dx, item.projected.screen.dy);
-      // One canvas unit becomes one metre, so nodes draw in real dimensions.
-      canvas.scale(item.projected.scale);
-      item.node.paint(canvas, ctx);
-      canvas.restore();
+      if (node is ProjectedSceneNode) {
+        // Screen space, untransformed: the node projects its own vertices, which
+        // is the only way to get true perspective on something that recedes.
+        canvas.save();
+        node.paintProjected(
+          canvas,
+          ProjectedRenderContext(
+            camera: camera,
+            elapsed: elapsed,
+            viewportSize: size,
+          ),
+        );
+        canvas.restore();
+      } else {
+        final ctx = NodeRenderContext(
+          depth: item.projected.depth,
+          pixelsPerMetre: item.projected.scale,
+          elapsed: elapsed,
+          atmosphericOpacity: _atmosphericOpacity(item.projected.depth),
+          viewportSize: size,
+          screenPosition: item.projected.screen,
+          angleFromCentre: item.angle,
+        );
+
+        canvas.save();
+        canvas.translate(item.projected.screen.dx, item.projected.screen.dy);
+        // One canvas unit becomes one metre, so nodes draw in real dimensions.
+        canvas.scale(item.projected.scale);
+        node.paint(canvas, ctx);
+        canvas.restore();
+      }
 
       if (trace) Diagnostics.instance.breadcrumb('ar.node.done ${item.node.id}');
     }
