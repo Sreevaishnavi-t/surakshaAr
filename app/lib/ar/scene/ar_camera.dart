@@ -181,8 +181,16 @@ class ArCamera {
   }
 
   /// Projects a scene-space point, or returns null if it is behind the camera.
-  ProjectedPoint? project(Vector3 scenePoint) {
-    final world = worldPointOf(scenePoint);
+  ProjectedPoint? project(Vector3 scenePoint) =>
+      projectWorld(worldPointOf(scenePoint));
+
+  /// Projects a point already expressed in world space.
+  ///
+  /// Split out from [project] because environment sensing works in world space
+  /// throughout: the ground plane is defined by gravity, which is a world-frame
+  /// fact, and routing floor points back through scene space only to undo the
+  /// rotation again would be noise.
+  ProjectedPoint? projectWorld(Vector3 world) {
     final device = rotateVector(_deviceFromWorld, world);
 
     // The rear camera looks down device −Z, so view depth is the negated Z.
@@ -214,6 +222,48 @@ class ArCamera {
       depth: depth,
       scale: scale,
     );
+  }
+
+  /// Unit ray, in world space, through a viewport pixel.
+  ///
+  /// The inverse of [projectWorld]: given somewhere on screen, which direction
+  /// in the real world is that? Everything the environment scanner does starts
+  /// here — a detected floor edge is only a pixel row until it is turned back
+  /// into a direction and intersected with the ground.
+  Vector3 rayThrough(Offset screen) {
+    var right = (screen.dx - viewportCenter.dx) / _focalPixels;
+    var up = -(screen.dy - viewportCenter.dy) / _focalPixels;
+
+    // Undo the same display rotation that [projectWorld] applies, in reverse.
+    if (pose.displayRotationDegrees != 0) {
+      final c = math.cos(_displayRotationRad);
+      final s = math.sin(_displayRotationRad);
+      final unrotatedRight = right * c - up * s;
+      final unrotatedUp = right * s + up * c;
+      right = unrotatedRight;
+      up = unrotatedUp;
+    }
+
+    // Camera looks down device −Z.
+    final device = Vector3(right, up, -1.0)..normalize();
+    return rotateVector(pose.worldFromDevice, device);
+  }
+
+  /// Viewport row where the horizon sits, or null when it is off screen.
+  ///
+  /// The horizon is where the ground plane meets infinity, so it depends only on
+  /// how the phone is tilted — not on camera height. It is the dividing line
+  /// between pixels that can be floor and pixels that cannot, which makes it the
+  /// cheapest possible sanity check on any floor detection.
+  double? horizonY() {
+    final forward = pose.viewDirection;
+    // Horizontal component of the view direction, lifted to level.
+    final level = Vector3(forward.x, forward.y, 0);
+    if (level.length2 < 1e-9) return null; // Straight up or straight down.
+    level.normalize();
+
+    final projected = projectWorld(level * 1e6);
+    return projected?.screen.dy;
   }
 
   /// Angle in radians between the camera's view axis and a scene point.
