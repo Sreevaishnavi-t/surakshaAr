@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../ar/environment/environment_map.dart';
 import '../../../ar/pose/pose_service.dart';
 import '../../../core/theme/app_theme.dart';
 
@@ -90,17 +91,35 @@ class SessionCalibrationGate extends StatelessWidget {
     super.key,
     required this.capabilities,
     required this.intrinsicsAreMeasured,
+    required this.environment,
     required this.onBegin,
     required this.onExit,
   });
 
   final PoseCapabilities capabilities;
   final bool intrinsicsAreMeasured;
+
+  /// Live room map, so the sweep shows the worker what it is actually finding
+  /// rather than an indeterminate spinner.
+  final EnvironmentMap environment;
+
   final VoidCallback onBegin;
   final VoidCallback onExit;
 
   @override
   Widget build(BuildContext context) {
+    // Rebuilds as the map fills, so progress is honest and visible.
+    return ListenableBuilder(
+      listenable: environment,
+      builder: (context, _) => _build(context),
+    );
+  }
+
+  Widget _build(BuildContext context) {
+    final coverage = environment.coverage;
+    final doors = environment.doors;
+    final ready = environment.isUsable;
+
     final warnings = <String>[
       if (!capabilities.supportsWorldLocking)
         'This phone has no motion sensor, so the scene cannot stay locked to '
@@ -122,28 +141,37 @@ class SessionCalibrationGate extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.end,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(
-                Icons.threesixty,
+              Icon(
+                ready ? Icons.check_circle_outline : Icons.threesixty,
                 size: 56,
-                color: AppTheme.infoBlue,
+                color: ready ? AppTheme.safeGreen : AppTheme.infoBlue,
               ),
               const SizedBox(height: 18),
-              const Text(
-                'Face your work area',
-                style: TextStyle(
+              Text(
+                ready ? 'Ready' : 'Look around your workplace',
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 26,
                   fontWeight: FontWeight.w700,
                 ),
               ),
               const SizedBox(height: 12),
-              const Text(
-                'Stand where you have room to turn around. Hold the phone up '
-                'like a window and look towards open space, then start.\n\n'
-                'During the drill you will need to turn your body to look '
-                'around you.',
-                style: TextStyle(color: Colors.white70, fontSize: 16, height: 1.45),
+              Text(
+                ready
+                    ? 'The drill will use the real space around you. The doors '
+                        'and clear floor found here are where things will '
+                        'appear.'
+                    : 'Stand where you have room to turn. Hold the phone up '
+                        'like a window and turn slowly on the spot, so the app '
+                        'can see the floor and find the doors around you.',
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 16,
+                  height: 1.45,
+                ),
               ),
+              const SizedBox(height: 18),
+              _ScanProgress(coverage: coverage, doorsFound: doors.length),
               if (warnings.isNotEmpty) ...[
                 const SizedBox(height: 18),
                 for (final warning in warnings)
@@ -268,6 +296,60 @@ class _GatePanel extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Live feedback during the room scan.
+///
+/// Shows what has actually been found rather than a spinner. That matters for
+/// trust as much as for usability: a worker who can see the app counting real
+/// doors around them understands that the drill is about their workplace, and a
+/// worker who sees zero doors found learns something true about the limits of
+/// what the app can see before the drill starts rather than during it.
+class _ScanProgress extends StatelessWidget {
+  const _ScanProgress({required this.coverage, required this.doorsFound});
+
+  final double coverage;
+  final int doorsFound;
+
+  @override
+  Widget build(BuildContext context) {
+    // Full marks at a third of the circle — the sweep a worker makes without
+    // moving their feet, and enough to place content in front of them.
+    final progress = (coverage / 0.33).clamp(0.0, 1.0);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: LinearProgressIndicator(
+            value: progress,
+            minHeight: 8,
+            backgroundColor: Colors.white24,
+            valueColor: AlwaysStoppedAnimation(
+              progress >= 1 ? AppTheme.safeGreen : AppTheme.infoBlue,
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            const Icon(Icons.door_front_door_outlined,
+                size: 18, color: Colors.white70),
+            const SizedBox(width: 8),
+            Text(
+              switch (doorsFound) {
+                0 => 'No doorways found yet',
+                1 => '1 doorway found',
+                _ => '$doorsFound doorways found',
+              },
+              style: const TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

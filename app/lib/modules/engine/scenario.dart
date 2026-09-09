@@ -2,6 +2,7 @@ import 'dart:ui' show Offset;
 
 import 'package:flutter/foundation.dart';
 
+import '../../ar/environment/environment_map.dart';
 import '../../ar/scene/ar_camera.dart';
 import '../../ar/scene/scene_graph.dart';
 import '../../core/theme/app_theme.dart';
@@ -163,6 +164,19 @@ abstract class ArScenario extends ChangeNotifier {
 
   /// Non-null once [isFinished] is true.
   ScenarioResult? get result;
+
+  /// Offers the scenario what has been learned about the worker's real
+  /// surroundings, once, before the drill starts.
+  ///
+  /// This is where content stops being decorative and starts being about the
+  /// room the worker is standing in. An implementation should move its nodes
+  /// onto real detected features — the exit onto an actual doorway, the fire
+  /// onto actual open floor — rather than the authored bearings it was built
+  /// with, which were only ever a fallback for a room nobody had looked at.
+  ///
+  /// The default is to do nothing, so a scenario that has no spatial content,
+  /// or that is deliberately abstract, is unaffected.
+  void applyEnvironment(EnvironmentMap map, ArCamera camera) {}
 
   /// Called when the worker abandons the act. Implementations should record it
   /// rather than silently discarding progress.

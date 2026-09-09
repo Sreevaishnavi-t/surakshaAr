@@ -30,6 +30,18 @@ class ArCameraController extends ChangeNotifier with WidgetsBindingObserver {
   /// backdrop, so it asks for no analysis pipeline at all.
   final bool forImageStream;
 
+  /// Receives frames when [forImageStream] is set.
+  ///
+  /// Environment sensing is an enhancement, never a dependency: if the stream
+  /// cannot be started the drill still runs, just without knowing the room. So
+  /// this is wired defensively and its failure is logged, not surfaced as an
+  /// error the worker has to deal with.
+  void Function(CameraImage image)? onFrame;
+
+  bool _streaming = false;
+
+  bool get isStreaming => _streaming;
+
   CameraController? _controller;
   CameraDescription? _description;
   CameraFailure? _failure;
@@ -100,6 +112,18 @@ class ArCameraController extends ChangeNotifier with WidgetsBindingObserver {
       _controller = controller;
       _description = rear;
       _failure = null;
+
+      if (forImageStream && onFrame != null) {
+        try {
+          await controller.startImageStream((image) => onFrame?.call(image));
+          _streaming = true;
+        } catch (e) {
+          // A camera that will not stream still shows a preview, and a drill
+          // without environment sensing is far better than no drill.
+          debugPrint('ArCameraController: image stream unavailable: $e');
+          _streaming = false;
+        }
+      }
     } on CameraException catch (e) {
       debugPrint('ArCameraController: ${e.code} ${e.description}');
       _fail(
@@ -131,6 +155,7 @@ class ArCameraController extends ChangeNotifier with WidgetsBindingObserver {
       case AppLifecycleState.hidden:
         if (controller != null) {
           _controller = null;
+          _streaming = false;
           notifyListeners();
           unawaited(controller.dispose());
         }
@@ -144,6 +169,7 @@ class ArCameraController extends ChangeNotifier with WidgetsBindingObserver {
   @override
   void dispose() {
     _disposed = true;
+    _streaming = false;
     WidgetsBinding.instance.removeObserver(this);
     unawaited(_controller?.dispose());
     _controller = null;

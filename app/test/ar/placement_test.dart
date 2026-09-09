@@ -9,7 +9,6 @@ import 'package:surakshaar/ar/environment/ground_plane.dart';
 import 'package:surakshaar/ar/environment/placement_resolver.dart';
 import 'package:surakshaar/ar/pose/device_pose.dart';
 import 'package:surakshaar/ar/scene/ar_camera.dart';
-import 'package:vector_math/vector_math_64.dart';
 
 const ground = GroundPlane(cameraHeightMetres: 1.5);
 

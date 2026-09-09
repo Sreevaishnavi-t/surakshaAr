@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+import '../../ar/environment/environment_map.dart';
+import '../../ar/environment/placement_resolver.dart';
 import '../../ar/fx/fire_fx.dart';
 import '../../ar/nodes/basic_nodes.dart';
 import '../../ar/scene/ar_camera.dart';
@@ -18,6 +20,9 @@ abstract final class _Copy {
   static const findExit = 'Find the fire exit. Look all around you.';
   static const hintLook =
       'Turn around slowly. The fire exit has a green running-man sign.';
+  static const hintRealDoor =
+      'Turn around slowly. Look for a real doorway around you — the green '
+      'running-man sign is on it.';
   static const hintHighlight = 'The green exit is marked for you now. Tap it.';
 
   static const lockedDoor =
@@ -90,9 +95,109 @@ class FireAct1ExitScenario extends ArScenario {
 
   /// Bearing of the fire, in degrees from the worker's starting heading.
   late final double _fireBearing;
+  late final double _exitBearing;
+  late final double _lockedBearing;
+  late final double _liftBearing;
+
+  /// True once the exit has been pinned to a doorway detected in the room.
+  ///
+  /// Drives the prompt: telling a worker to "find the green sign" is honest
+  /// when the sign is on a real door and misleading when it is floating in the
+  /// middle of the room because no door was found.
+  bool _exitAnchoredToRealDoor = false;
 
   @override
   List<SceneNode> get nodes => _nodes;
+
+  /// Re-places the act onto the room the worker is actually standing in.
+  ///
+  /// The bearings chosen in [_build] were always a fallback. Once the scan has
+  /// found real doorways and real open floor, the exit belongs on an actual
+  /// door and the fire on actual clear ground — because the skill being drilled
+  /// is finding the way out of *this* room, and a green sign hanging in mid-air
+  /// teaches a worker to look for something that will not be there.
+  ///
+  /// The decoys matter as much as the exit. A locked door and a lift are only
+  /// meaningful as traps if they sit somewhere a worker would plausibly try, so
+  /// they are placed on other detected doorways where any exist.
+  @override
+  void applyEnvironment(EnvironmentMap map, ArCamera camera) {
+    if (!map.isUsable) return;
+
+    const resolver = PlacementResolver();
+
+    // Exits first, deliberately. A drill with the fire in the right place and
+    // the exit in the wrong one is worse than the reverse.
+    final resolved = resolver.resolveAll(
+      map: map,
+      requests: [
+        PlacementRequest(
+          id: 'exit.correct',
+          kind: PlacementKind.exit,
+          preferredBearingRadians: _worldBearing(camera, _exitBearing),
+          preferredDistanceMetres: 7,
+        ),
+        PlacementRequest(
+          id: 'exit.locked',
+          kind: PlacementKind.exit,
+          preferredBearingRadians: _worldBearing(camera, _lockedBearing),
+          preferredDistanceMetres: 4.4,
+        ),
+        PlacementRequest(
+          id: 'exit.lift',
+          kind: PlacementKind.exit,
+          preferredBearingRadians: _worldBearing(camera, _liftBearing),
+          preferredDistanceMetres: 6.1,
+        ),
+        PlacementRequest(
+          id: 'fire',
+          kind: PlacementKind.hazard,
+          preferredBearingRadians: _worldBearing(camera, _fireBearing),
+          preferredDistanceMetres: 5.2,
+          minDistanceMetres: 2.5,
+        ),
+      ],
+    );
+
+    for (final placement in resolved) {
+      // Back into scene space, so the existing node pipeline is untouched.
+      final scene = camera.scenePointOf(placement.worldPosition);
+      switch (placement.id) {
+        case 'exit.correct':
+          _fireExit.position.setFrom(scene);
+          _exitRing.position.setFrom(scene);
+          _exitAnchoredToRealDoor =
+              placement.anchor == PlacementAnchor.detectedDoor;
+        case 'exit.locked':
+          _lockedDoor.position.setFrom(scene);
+        case 'exit.lift':
+          _lift.position.setFrom(scene);
+        case 'fire':
+          _fire.position.setFrom(scene);
+          // Smoke rises from the fire, so it follows rather than being placed.
+          _smoke.position
+            ..setFrom(scene)
+            ..z += 0.7;
+      }
+    }
+
+    notifyListeners();
+  }
+
+  /// Converts an authored scene-space bearing into a world-frame one.
+  ///
+  /// Scenario bearings are relative to wherever the worker was facing at the
+  /// start; the environment map is in world space. Without this the hint would
+  /// be interpreted against the wrong zero and the resolver would prefer
+  /// features in an arbitrary direction.
+  double _worldBearing(ArCamera camera, double sceneBearingDegrees) {
+    final scenePoint = scenePlacement(
+      bearingDegrees: sceneBearingDegrees,
+      distanceMetres: 1,
+    );
+    final world = camera.worldPointOf(scenePoint);
+    return math.atan2(world.y, world.x);
+  }
 
   void _build() {
     // Layout is randomised per attempt within sensible bounds. Two workers
@@ -102,9 +207,9 @@ class FireAct1ExitScenario extends ArScenario {
     final jitter = (_random.nextDouble() - 0.5) * 24;
 
     _fireBearing = (28 + jitter) * mirror;
-    final exitBearing = (-118 + jitter * 0.6) * mirror;
-    final lockedBearing = (-38 + jitter * 0.4) * mirror;
-    final liftBearing = (96 + jitter * 0.5) * mirror;
+    _exitBearing = (-118 + jitter * 0.6) * mirror;
+    _lockedBearing = (-38 + jitter * 0.4) * mirror;
+    _liftBearing = (96 + jitter * 0.5) * mirror;
 
     const floor = -kEyeHeightMetres;
 
@@ -129,7 +234,7 @@ class FireAct1ExitScenario extends ArScenario {
     _fireExit = SafetyNodes.fireExit(
       id: 'exit.correct',
       position: scenePlacement(
-        bearingDegrees: exitBearing,
+        bearingDegrees: _exitBearing,
         distanceMetres: 7.0,
         heightMetres: floor,
       ),
@@ -146,7 +251,7 @@ class FireAct1ExitScenario extends ArScenario {
     _lockedDoor = SafetyNodes.lockedDoor(
       id: 'exit.locked',
       position: scenePlacement(
-        bearingDegrees: lockedBearing,
+        bearingDegrees: _lockedBearing,
         distanceMetres: 4.4,
         heightMetres: floor,
       ),
@@ -155,7 +260,7 @@ class FireAct1ExitScenario extends ArScenario {
     _lift = SafetyNodes.lift(
       id: 'exit.lift',
       position: scenePlacement(
-        bearingDegrees: liftBearing,
+        bearingDegrees: _liftBearing,
         distanceMetres: 6.1,
         heightMetres: floor,
       ),
@@ -182,7 +287,10 @@ class FireAct1ExitScenario extends ArScenario {
     if (_elapsed >= _secondHintAfter) {
       hint = _Copy.hintHighlight;
     } else if (_elapsed >= _firstHintAfter) {
-      hint = _Copy.hintLook;
+      // Only promise a real door when there is one. Telling a worker to look
+      // for a doorway that the app has hung in mid-air trains them to look for
+      // something that will not be there in the real workshop.
+      hint = _exitAnchoredToRealDoor ? _Copy.hintRealDoor : _Copy.hintLook;
     }
 
     return ScenarioPrompt(

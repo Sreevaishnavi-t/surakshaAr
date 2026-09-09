@@ -8,6 +8,8 @@ import '../../ar/pose/pose_service.dart';
 import '../../ar/scene/ar_camera.dart';
 import '../../ar/scene/ar_renderer.dart';
 import '../../ar/session/ar_frame_notifier.dart';
+import '../../ar/environment/environment_map.dart';
+import '../../ar/environment/scene_scanner.dart';
 import '../../core/diagnostics.dart';
 import '../../core/theme/app_theme.dart';
 import '../../modules/catalogue.dart';
@@ -21,7 +23,14 @@ enum _SessionPhase {
   preparing,
   needsCamera,
   unsupported,
-  calibrating,
+
+  /// Sweeping the phone across the space so the room can be mapped.
+  ///
+  /// Replaces what used to be a bare "face this way and tap Begin". That gave
+  /// the engine a heading and nothing else, which is why content could only
+  /// ever be placed at invented bearings. The sweep captures the heading *and*
+  /// the room in one gesture the worker has to make anyway.
+  scanning,
   running,
   finished,
 }
@@ -43,7 +52,12 @@ class ArSessionScreen extends StatefulWidget {
 class _ArSessionScreenState extends State<ArSessionScreen>
     with TickerProviderStateMixin {
   final PoseService _poseService = PoseService();
-  final ArCameraController _cameraController = ArCameraController();
+  final ArCameraController _cameraController =
+      ArCameraController(forImageStream: true);
+
+  /// What the app has worked out about the room, built during the scan sweep.
+  final EnvironmentMap _environment = EnvironmentMap();
+  late final SceneScanner _scanner = SceneScanner(map: _environment);
 
   late final ArFrameNotifier _frames;
 
@@ -111,6 +125,14 @@ class _ArSessionScreenState extends State<ArSessionScreen>
       _intrinsics = intrinsics;
     });
 
+    _scanner.cameraProvider = () {
+      final viewport = _lastViewport;
+      return viewport == null ? null : _cameraFor(viewport, _frames.pose);
+    };
+    _scanner.quarterTurns =
+        ((_cameraController.description?.sensorOrientation ?? 90) ~/ 90) & 3;
+    _cameraController.onFrame = _scanner.onFrame;
+
     diagnostics.breadcrumb('ar.camera.init.begin');
     await _cameraController.initialise();
     final preview = _cameraController.displayPreviewSize;
@@ -138,7 +160,7 @@ class _ArSessionScreenState extends State<ArSessionScreen>
       } else if (_cameraController.failure != null) {
         _phase = _SessionPhase.unsupported;
       } else {
-        _phase = _SessionPhase.calibrating;
+        _phase = _SessionPhase.scanning;
       }
     });
   }
@@ -151,12 +173,26 @@ class _ArSessionScreenState extends State<ArSessionScreen>
   void _calibrate() {
     Diagnostics.instance.breadcrumb(
       'ar.calibrate yaw=${_frames.pose.yaw.toStringAsFixed(3)} '
-      'source=${_frames.pose.source.name} samples=${_frames.sampleCount}',
+      'source=${_frames.pose.source.name} samples=${_frames.sampleCount} '
+      'coverage=${(_environment.coverage * 100).round()}% '
+      'doors=${_environment.doors.length}',
     );
+
     setState(() {
       _worldFromScene = ArCamera.calibrationFromYaw(_frames.pose.yaw);
       _phase = _SessionPhase.running;
     });
+
+    // Offer the room to the scenario now that the scene rotation is fixed, so
+    // world-space detections can be converted into the scene space its nodes
+    // live in.
+    final viewport = _lastViewport;
+    if (viewport != null) {
+      _scenario.applyEnvironment(
+        _environment,
+        _cameraFor(viewport, _frames.pose),
+      );
+    }
   }
 
   ArCamera _cameraFor(Size viewportSize, DevicePose pose) {
@@ -321,10 +357,11 @@ class _ArSessionScreenState extends State<ArSessionScreen>
                 },
               ),
 
-            if (_phase == _SessionPhase.calibrating) ...[
+            if (_phase == _SessionPhase.scanning) ...[
               SessionCalibrationGate(
                 capabilities: _capabilities,
                 intrinsicsAreMeasured: _intrinsics.isMeasured,
+                environment: _environment,
                 onBegin: _calibrate,
                 onExit: () => Navigator.of(context).maybePop(),
               ),
