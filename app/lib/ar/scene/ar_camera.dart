@@ -224,6 +224,22 @@ class ArCamera {
     );
   }
 
+  /// Transforms a world-space point back into scene space.
+  ///
+  /// The inverse of [worldPointOf]. Environment sensing works in world space
+  /// because gravity and the room are world-frame facts, while scenarios are
+  /// authored in scene space; this is the bridge that lets a node placed on a
+  /// real detected door still travel through the existing scene pipeline.
+  Vector3 scenePointOf(Vector3 worldPoint) {
+    final shifted = worldPoint.clone();
+    final origin = sceneOrigin;
+    if (origin != null) shifted.sub(origin);
+
+    final scene = worldFromScene;
+    if (scene == null) return shifted;
+    return rotateVectorInverse(scene, shifted);
+  }
+
   /// Unit ray, in world space, through a viewport pixel.
   ///
   /// The inverse of [projectWorld]: given somewhere on screen, which direction

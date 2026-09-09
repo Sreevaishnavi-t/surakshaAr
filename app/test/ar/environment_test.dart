@@ -156,6 +156,8 @@ void main() {
     });
   });
 
+  _cameraFrameTests();
+
   group('DoorDetector', () {
     const floorDetector = FloorDetector();
     const doorDetector = DoorDetector();
@@ -365,6 +367,125 @@ void main() {
       expect(doors, isNotEmpty);
       // The door-proportioned opening is on the +Y (left) side.
       expect(doors.first.basePoint.y, greaterThan(0));
+    });
+  });
+}
+
+/// Guards the sensor-orientation and cover-crop mapping.
+///
+/// If this is wrong nothing crashes and nothing looks obviously broken — the
+/// room is simply reported rotated a quarter turn, so a door straight ahead is
+/// announced to the worker's left. Silent, and dangerous in a drill about
+/// finding the way out, so it is pinned.
+void _cameraFrameTests() {
+  group('LumaGrid.fromCameraFrame', () {
+    // A landscape sensor frame: left half dark, right half bright.
+    Uint8List splitFrame(int w, int h, int stride) {
+      final plane = Uint8List(stride * h);
+      for (var y = 0; y < h; y++) {
+        for (var x = 0; x < stride; x++) {
+          plane[y * stride + x] = x < w ~/ 2 ? 30 : 220;
+        }
+      }
+      return plane;
+    }
+
+    test('undoes a 90 degree sensor rotation', () {
+      const w = 640, h = 480, stride = 640;
+      final grid = LumaGrid.fromCameraFrame(
+        plane: splitFrame(w, h, stride),
+        imageWidth: w,
+        imageHeight: h,
+        rowStride: stride,
+        displayPreviewSize: const Size(480, 640),
+        viewportSize: const Size(480, 640),
+        quarterTurns: 1,
+        gridWidth: 8,
+        gridHeight: 8,
+      );
+
+      // A vertical split in the sensor becomes a horizontal split on screen.
+      // Turning a picture clockwise swings its left edge up to the top, so the
+      // sensor's dark left half lands at the top of the display.
+      expect(grid.at(4, 0), lessThan(100), reason: 'sensor left -> screen top');
+      expect(grid.at(4, 7), greaterThan(150), reason: 'sensor right -> screen bottom');
+    });
+
+    test('leaves an unrotated frame alone', () {
+      const w = 640, h = 480, stride = 640;
+      final grid = LumaGrid.fromCameraFrame(
+        plane: splitFrame(w, h, stride),
+        imageWidth: w,
+        imageHeight: h,
+        rowStride: stride,
+        displayPreviewSize: const Size(640, 480),
+        viewportSize: const Size(640, 480),
+        quarterTurns: 0,
+        gridWidth: 8,
+        gridHeight: 8,
+      );
+
+      // No rotation: the split stays vertical.
+      expect(grid.at(0, 4), lessThan(100));
+      expect(grid.at(7, 4), greaterThan(150));
+    });
+
+    test('respects row stride', () {
+      const w = 640, h = 480, stride = 704; // padded rows
+      final plane = Uint8List(stride * h);
+      for (var y = 0; y < h; y++) {
+        for (var x = 0; x < stride; x++) {
+          // Image area uniform; padding deliberately bright garbage.
+          plane[y * stride + x] = x < w ? 100 : 255;
+        }
+      }
+
+      final grid = LumaGrid.fromCameraFrame(
+        plane: plane,
+        imageWidth: w,
+        imageHeight: h,
+        rowStride: stride,
+        displayPreviewSize: const Size(480, 640),
+        viewportSize: const Size(480, 640),
+        gridWidth: 8,
+        gridHeight: 8,
+      );
+
+      // Every cell should read the uniform image area, never the padding.
+      for (var y = 0; y < 8; y++) {
+        for (var x = 0; x < 8; x++) {
+          expect(grid.at(x, y), closeTo(100, 6));
+        }
+      }
+    });
+
+    test('samples only the visible part of a cover-cropped preview', () {
+      // A 4:3 preview shown in a tall viewport is cropped left and right, so
+      // the extreme edges of the sensor are off screen and must not be sampled.
+      const w = 640, h = 480, stride = 640;
+      final plane = Uint8List(stride * h);
+      for (var y = 0; y < h; y++) {
+        for (var x = 0; x < stride; x++) {
+          // Mark only the very top and bottom sensor rows, which become the
+          // left and right screen edges after a quarter turn.
+          plane[y * stride + x] = (y < 20 || y > h - 20) ? 255 : 90;
+        }
+      }
+
+      final grid = LumaGrid.fromCameraFrame(
+        plane: plane,
+        imageWidth: w,
+        imageHeight: h,
+        rowStride: stride,
+        displayPreviewSize: const Size(480, 640),
+        viewportSize: const Size(384, 832),
+        gridWidth: 8,
+        gridHeight: 8,
+      );
+
+      // The cropped-away bands should not dominate any cell.
+      final centre = grid.at(4, 4);
+      expect(centre, closeTo(90, 12));
     });
   });
 }

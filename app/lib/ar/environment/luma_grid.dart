@@ -1,4 +1,6 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui' show Size;
 
 /// A heavily downsampled greyscale view of a camera frame.
 ///
@@ -76,6 +78,96 @@ class LumaGrid {
     }
 
     return LumaGrid(width: gridWidth, height: gridHeight, cells: cells);
+  }
+
+  /// Builds a grid whose cells map **linearly onto the viewport**, undoing both
+  /// the sensor rotation and the cover crop.
+  ///
+  /// This matters more than it looks. Camera frames arrive in sensor
+  /// orientation, which is landscape on essentially every phone, while the
+  /// activity is portrait and the preview is drawn `BoxFit.cover` — so it is
+  /// also cropped. Sampling the frame naively would leave every detection
+  /// rotated a quarter turn and shifted by the crop, which does not look like a
+  /// bug so much as a room that is simply wrong: doors would be reported to the
+  /// worker's side when they are straight ahead.
+  ///
+  /// Working backwards from the viewport instead means grid cell (x, y) always
+  /// corresponds to the viewport pixel the rest of the pipeline assumes, and
+  /// `rayThrough` can be trusted.
+  factory LumaGrid.fromCameraFrame({
+    required Uint8List plane,
+    required int imageWidth,
+    required int imageHeight,
+    required int rowStride,
+    required Size displayPreviewSize,
+    required Size viewportSize,
+    int quarterTurns = 1,
+    int gridWidth = 32,
+    int gridHeight = 24,
+  }) {
+    final cells = Uint8List(gridWidth * gridHeight);
+
+    final pw = displayPreviewSize.width;
+    final ph = displayPreviewSize.height;
+    if (pw <= 0 || ph <= 0) {
+      return LumaGrid(width: gridWidth, height: gridHeight, cells: cells);
+    }
+
+    // The preview is scaled up until it covers the viewport, then centre-cropped.
+    final cover = math.max(viewportSize.width / pw, viewportSize.height / ph);
+    final offsetX = (pw * cover - viewportSize.width) / 2;
+    final offsetY = (ph * cover - viewportSize.height) / 2;
+
+    for (var gy = 0; gy < gridHeight; gy++) {
+      for (var gx = 0; gx < gridWidth; gx++) {
+        // Centre of this cell, in viewport pixels.
+        final vx = (gx + 0.5) / gridWidth * viewportSize.width;
+        final vy = (gy + 0.5) / gridHeight * viewportSize.height;
+
+        // Undo the cover crop to reach display-preview space, normalised.
+        final dx = ((vx + offsetX) / cover) / pw;
+        final dy = ((vy + offsetY) / cover) / ph;
+
+        // Undo the sensor rotation to reach sensor space, normalised.
+        final (sx, sy) = _unrotate(dx, dy, quarterTurns);
+
+        final px = (sx * imageWidth).round().clamp(0, imageWidth - 1);
+        final py = (sy * imageHeight).round().clamp(0, imageHeight - 1);
+
+        // Average a small block so one noisy pixel cannot invent an edge.
+        var total = 0;
+        var count = 0;
+        for (var oy = -1; oy <= 1; oy++) {
+          final ry = (py + oy).clamp(0, imageHeight - 1);
+          final rowStart = ry * rowStride;
+          for (var ox = -1; ox <= 1; ox++) {
+            final rx = (px + ox).clamp(0, imageWidth - 1);
+            final index = rowStart + rx;
+            if (index < 0 || index >= plane.length) continue;
+            total += plane[index];
+            count++;
+          }
+        }
+
+        cells[gy * gridWidth + gx] = count == 0 ? 0 : (total ~/ count);
+      }
+    }
+
+    return LumaGrid(width: gridWidth, height: gridHeight, cells: cells);
+  }
+
+  /// Maps a normalised display-space point back to normalised sensor space.
+  static (double, double) _unrotate(double dx, double dy, int quarterTurns) {
+    switch (quarterTurns & 3) {
+      case 1: // sensor rotated 90 degrees clockwise to display
+        return (dy, 1 - dx);
+      case 2:
+        return (1 - dx, 1 - dy);
+      case 3:
+        return (1 - dy, dx);
+      default:
+        return (dx, dy);
+    }
   }
 
   /// Mean intensity of one grid row.
