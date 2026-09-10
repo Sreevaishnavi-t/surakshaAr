@@ -1,10 +1,12 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
-import 'package:flutter/material.dart' show Colors, IconData, Icons;
+import 'package:flutter/material.dart'
+    show Alignment, Colors, IconData, Icons, LinearGradient;
 import 'package:vector_math/vector_math_64.dart' show Vector3;
 
 import '../scene/scene_graph.dart';
+import 'holo_style.dart';
 
 /// Shared drawing conventions for every node in the library.
 ///
@@ -101,43 +103,76 @@ class DoorwayNode extends SceneNode {
     final alpha = ctx.atmosphericOpacity;
     final halfWidth = widthMetres / 2;
 
-    // Anchored at the base: the doorway rises to negative Y.
-    final doorRect = Rect.fromLTRB(-halfWidth, -heightMetres, halfWidth, 0);
-
-    // Dark opening, so the doorway reads as a hole rather than a panel.
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(doorRect, const Radius.circular(0.04)),
-      Paint()..color = const Color(0xFF0B0E13).withValues(alpha: alpha * 0.72),
+    // Ground contact before anything else: this is what tells the worker the
+    // doorway is standing on the floor rather than hovering.
+    Holo.contactShadow(
+      canvas,
+      ctx,
+      heightAboveFloor: 0,
+      radiusMetres: halfWidth * 1.25,
     );
 
+    final doorRect = Rect.fromLTRB(-halfWidth, -heightMetres, halfWidth, 0);
+    final radius = const Radius.circular(0.05);
+    final rrect = RRect.fromRectAndRadius(doorRect, radius);
+
+    // The opening: a dark recess, lighter at the top where light falls in, so
+    // it reads as a hole with depth rather than a flat black rectangle.
     canvas.drawRRect(
-      RRect.fromRectAndRadius(doorRect, const Radius.circular(0.04)),
+      rrect,
       Paint()
-        ..color = frameColor.withValues(alpha: alpha)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = _kOutlineMetres * 2,
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            const Color(0xFF161B22).withValues(alpha: alpha * 0.88),
+            const Color(0xFF05070A).withValues(alpha: alpha * 0.94),
+          ],
+        ).createShader(doorRect),
+    );
+
+    // Jambs and lintel as a bright frame. Drawn in screen-pixel widths so the
+    // frame stays a crisp line at every distance instead of ballooning into a
+    // slab up close.
+    canvas.drawRRect(
+      rrect,
+      Holo.stroke(ctx, color: frameColor, pixels: 4),
+    );
+    // Inner highlight, one pixel in from the frame: cheap bevel, and it stops
+    // the frame melting into a bright wall behind it.
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(doorRect.deflate(Holo.px(ctx, 3)), radius),
+      Holo.stroke(ctx, color: Colors.white, pixels: 1.2, opacity: 0.5),
     );
 
     if (highlight) {
-      final phase = math.sin(ctx.seconds * 3.2) * 0.5 + 0.5;
+      // Expanding pulse rather than a static glow: motion is what draws the
+      // eye across a cluttered camera image.
+      final t = (ctx.seconds * 0.8) % 1.0;
       canvas.drawRRect(
         RRect.fromRectAndRadius(
-          doorRect.inflate(0.09),
-          const Radius.circular(0.08),
+          doorRect.inflate(0.06 + t * 0.30),
+          const Radius.circular(0.12),
         ),
-        Paint()
-          ..color = frameColor.withValues(alpha: alpha * (0.3 + 0.5 * phase))
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = _kOutlineMetres * 2.4,
+        Holo.stroke(
+          ctx,
+          color: frameColor,
+          pixels: 3,
+          opacity: (1 - t) * 0.8,
+        ),
       );
     }
 
     final sign = signColor;
-    if (sign != null) {
-      _paintSignPanel(canvas, ctx, doorRect, sign);
-    }
+    if (sign != null) _paintSignPanel(canvas, ctx, doorRect, sign);
   }
 
+  /// The sign above the door.
+  ///
+  /// Drawn as a real ISO 7010 style panel rather than a coloured chip, because
+  /// recognising that exact sign on a real wall is part of what the drill is
+  /// teaching. A worker who learns to look for "a green rectangle" has learned
+  /// less than one who learns to look for the running man.
   void _paintSignPanel(
     Canvas canvas,
     NodeRenderContext ctx,
@@ -148,15 +183,35 @@ class DoorwayNode extends SceneNode {
     const panelHeight = 0.34;
     const gap = 0.12;
     final panel = Rect.fromLTRB(
-      doorRect.left + 0.05,
+      doorRect.left + 0.02,
       doorRect.top - gap - panelHeight,
-      doorRect.right - 0.05,
+      doorRect.right - 0.02,
       doorRect.top - gap,
+    );
+    final panelRRect =
+        RRect.fromRectAndRadius(panel, const Radius.circular(0.04));
+
+    // Backlight, so the sign glows the way an illuminated one does.
+    canvas.drawRRect(
+      panelRRect,
+      Holo.glow(ctx, color: sign, pixels: 16, opacity: 0.55),
     );
 
     canvas.drawRRect(
-      RRect.fromRectAndRadius(panel, const Radius.circular(0.05)),
-      Paint()..color = sign.withValues(alpha: alpha * 0.92),
+      panelRRect,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Color.lerp(sign, Colors.white, 0.28)!.withValues(alpha: alpha),
+            sign.withValues(alpha: alpha),
+          ],
+        ).createShader(panel),
+    );
+    canvas.drawRRect(
+      panelRRect,
+      Holo.stroke(ctx, color: Colors.white, pixels: 1.6, opacity: 0.85),
     );
 
     final icon = signIcon;
@@ -165,7 +220,7 @@ class DoorwayNode extends SceneNode {
         canvas: canvas,
         icon: icon,
         center: panel.center,
-        sizeMetres: panelHeight * 0.72,
+        sizeMetres: panelHeight * 0.78,
         color: Colors.white.withValues(alpha: alpha),
       );
     }
