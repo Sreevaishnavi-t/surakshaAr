@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:surakshaar/assessment/assessment_engine.dart';
 import 'package:surakshaar/assessment/question_bank.dart';
 import 'package:surakshaar/core/l10n/app_localizations.dart';
 import 'package:surakshaar/features/assessment/assessment_screen.dart';

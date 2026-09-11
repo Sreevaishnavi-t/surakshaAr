@@ -7,6 +7,7 @@ import 'package:surakshaar/ar/environment/door_detector.dart';
 import 'package:surakshaar/ar/environment/floor_detector.dart';
 import 'package:surakshaar/ar/environment/ground_plane.dart';
 import 'package:surakshaar/ar/environment/luma_grid.dart';
+import 'package:surakshaar/ar/environment/scene_scanner.dart';
 import 'package:surakshaar/ar/pose/device_pose.dart';
 import 'package:surakshaar/ar/scene/ar_camera.dart';
 import 'package:vector_math/vector_math_64.dart';
@@ -179,8 +180,12 @@ void main() {
       double doorCentreLateral = 0,
       int wallLuma = 170,
       int openingLuma = 25,
+      // The height the scene is really rendered from, which is not necessarily
+      // the height the detector will later be told about.
+      double trueCameraHeight = cameraHeight,
+      int gw = 32,
+      int gh = 24,
     }) {
-      const gw = 32, gh = 24;
       return gridOf(gw, gh, (gx, gy) {
         final screen = Offset(
           (gx + 0.5) / gw * camera.viewportSize.width,
@@ -194,12 +199,12 @@ void main() {
 
         // Floor wins when the ray reaches it before the wall.
         if (ray.z < 0) {
-          final tGround = cameraHeight / -ray.z;
+          final tGround = trueCameraHeight / -ray.z;
           if (tGround < tWall) return 80 + jitter(gx, gy, 6);
         }
 
         final lateral = ray.y * tWall;
-        final height = ray.z * tWall + cameraHeight;
+        final height = ray.z * tWall + trueCameraHeight;
 
         if (doorWidth != null &&
             height >= 0 &&
@@ -211,13 +216,20 @@ void main() {
       });
     }
 
-    List<DoorCandidate> detectIn(LumaGrid grid, ArCamera camera) =>
+    List<DoorCandidate> detectWith(
+      LumaGrid grid,
+      ArCamera camera,
+      GroundPlane plane,
+    ) =>
         doorDetector.detect(
           grid: grid,
           floor: floorDetector.detect(grid),
           camera: camera,
-          ground: ground,
+          ground: plane,
         );
+
+    List<DoorCandidate> detectIn(LumaGrid grid, ArCamera camera) =>
+        detectWith(grid, camera, ground);
 
     test('recovers the real width and height of a doorway', () {
       final camera = cameraTilted(-0.15);
@@ -240,6 +252,94 @@ void main() {
       expect(door.isOpening, isTrue);
       expect(door.basePoint.z, closeTo(-cameraHeight, 1e-6),
           reason: 'the threshold must sit on the floor plane');
+    });
+
+    test('every measured metre scales with the camera height it was told', () {
+      // The coupling that makes asking the worker their height worth doing.
+      // Gravity gives the ground plane its orientation for free, so the camera
+      // height is the *only* unknown left in it — and every door measurement is
+      // a screen ray intersected with that plane. Tell the detector a height
+      // 20% wrong and it reports a door 20% wrong, which is precisely how a
+      // real 1.4 m double door gets refused by the 1.6 m ceiling.
+      //
+      // The grid is rendered once, from one true height, and only what the
+      // detector is *told* changes. So the jamb pixels are identical across the
+      // runs and any difference in the answer is the plane's doing alone.
+      final camera = cameraTilted(-0.15);
+      const trueHeight = 1.30; // an average worker holding the phone at chest
+      final grid = renderWall(
+        camera: camera,
+        wallDistance: 5.0,
+        doorWidth: 0.9,
+        trueCameraHeight: trueHeight,
+      );
+
+      DoorCandidate toldItIs(double metres) {
+        final doors =
+            detectWith(grid, camera, GroundPlane(cameraHeightMetres: metres));
+        expect(doors, isNotEmpty, reason: 'nothing found when told $metres m');
+        return doors.first;
+      }
+
+      final truthful = toldItIs(trueHeight);
+      expect(truthful.widthMetres, closeTo(0.9, 0.25));
+      expect(truthful.heightMetres, closeTo(2.05, 0.45));
+
+      for (final factor in [0.8, 1.2]) {
+        final misled = toldItIs(trueHeight * factor);
+        expect(misled.widthMetres, closeTo(truthful.widthMetres * factor, 0.02),
+            reason: 'width should be off by exactly $factor');
+        expect(misled.heightMetres, closeTo(truthful.heightMetres * factor, 0.02),
+            reason: 'height should be off by exactly $factor');
+        expect(misled.distanceMetres,
+            closeTo(truthful.distanceMetres * factor, 0.05),
+            reason: 'distance should be off by exactly $factor');
+      }
+    });
+
+    test('rows, not columns, are what buy an accurate measurement', () {
+      // Pins the grid shape SceneScanner runs at, and the reason for it.
+      //
+      // Both of the detector's measurements are quantised by row height. The
+      // threshold is found by tracing up a column, and the door top is a ray
+      // through the highest row the jamb reached — so a coarse row grid puts
+      // the top edge tens of pixels off, which at seven metres is a third of a
+      // metre of door. Columns only locate the jamb left-to-right.
+      final camera = cameraTilted(-0.15);
+
+      double heightErrorAt(int gw, int gh) {
+        final grid = renderWall(
+          camera: camera,
+          wallDistance: 7.0,
+          doorWidth: 0.9,
+          gw: gw,
+          gh: gh,
+        );
+        final doors = detectIn(grid, camera);
+        expect(doors, isNotEmpty, reason: 'nothing found on a ${gw}x$gh grid');
+        return doors.first.heightMetres - 2.05;
+      }
+
+      final coarse = heightErrorAt(32, 24);
+      final moreColumns = heightErrorAt(64, 24);
+      final scanner = heightErrorAt(SceneScanner.gridColumns, SceneScanner.gridRows);
+
+      // The defect this shape exists to fix: at 24 rows the door reads half a
+      // metre too tall, which is within touching distance of the detector's own
+      // 2.6 m ceiling. One more metre of range and a real door is discarded.
+      expect(coarse, greaterThan(0.3),
+          reason: 'if this stops failing, 24 rows is no longer the problem '
+              'and this whole grid shape should be revisited');
+      expect(DoorDetector().maxHeightMetres - 2.05, lessThan(0.6),
+          reason: 'the ceiling is what makes the coarse error dangerous');
+
+      // Columns are not the fix.
+      expect((moreColumns - coarse).abs(), lessThan(0.05),
+          reason: 'doubling columns at 24 rows should change nothing');
+
+      // Rows are.
+      expect(scanner.abs(), lessThan(0.2));
+      expect(scanner.abs(), lessThan(coarse.abs() / 2));
     });
 
     test('points at the doorway, not past it', () {

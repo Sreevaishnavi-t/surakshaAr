@@ -28,6 +28,24 @@ class SceneScanner {
   final FloorDetector floorDetector;
   final DoorDetector doorDetector;
 
+  /// Shape of the analysis grid.
+  ///
+  /// Tall rather than square, and that is the whole point. Both measurements
+  /// the detector makes are quantised by the **row** height, not the column
+  /// width: a door's width is measured between the two points where its jambs
+  /// meet the floor, found by tracing up a column, and its height comes from a
+  /// ray through the topmost row the jamb reached. Columns only have to say
+  /// *which way* the jamb is, which a coarse grid already does well.
+  ///
+  /// Measured against a synthetic 2.05 m doorway at 7 m: 24 rows reports
+  /// 2.55 m — close enough to the detector's own 2.6 m ceiling that a door
+  /// slightly further away is rejected for being too tall — while 64 rows
+  /// reports 2.18 m. Doubling the *columns* at 24 rows changed nothing at all.
+  /// Past 64 rows the gain flattens. The extra rows cost well under a
+  /// millisecond a frame, nowhere near [minInterval].
+  static const int gridColumns = 32;
+  static const int gridRows = 64;
+
   /// Shortest gap between two analysed frames.
   final Duration minInterval;
 
@@ -92,6 +110,8 @@ class SceneScanner {
       displayPreviewSize: camera.previewSize,
       viewportSize: camera.viewportSize,
       quarterTurns: quarterTurns,
+      gridWidth: gridColumns,
+      gridHeight: gridRows,
     );
 
     // Convert the horizon into grid rows so the floor trace never climbs into
