@@ -52,13 +52,37 @@ abstract final class CameraHeight {
     );
   }
 
+  /// Standing eye height as a fraction of stature.
+  ///
+  /// Anthropometric surveys put the pupils a little over 6% of stature below
+  /// the crown of the head. It is a skeletal proportion rather than a habit, so
+  /// it holds across the whole range this question offers.
+  static const double _eyeHeightRatio = 0.936;
+
+  /// How far below the eyes the phone ends up, per hold, in metres.
+  ///
+  /// Fixed rather than proportional, deliberately. Eye height scales with the
+  /// body because it is a skeletal landmark; where somebody parks their hands
+  /// does not. A tall worker and a short worker bend their elbows the same way,
+  /// so scaling these by stature would invent a difference that is not there.
+  static const double _eyeLevelDropMetres = 0.05;
+  static const double _chestLevelDropMetres = 0.27;
+
   /// Height of the phone above the floor, in metres, for a worker of
   /// [bodyHeightMetres] holding it as described by [hold].
+  ///
+  /// Unclamped — [forWorker] is the entry point that keeps the result sane.
   static double cameraHeightFor({
     required double bodyHeightMetres,
     required PhoneHold hold,
   }) {
-    // TODO(human): derive the camera height from the worker's stature and hold.
-    return GroundPlane.assumed.cameraHeightMetres;
+    final eyeHeight = bodyHeightMetres * _eyeHeightRatio;
+
+    final drop = switch (hold) {
+      PhoneHold.atEyeLevel => _eyeLevelDropMetres,
+      PhoneHold.atChestLevel => _chestLevelDropMetres,
+    };
+
+    return eyeHeight - drop;
   }
 }
