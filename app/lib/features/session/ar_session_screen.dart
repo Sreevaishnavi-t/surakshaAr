@@ -19,6 +19,7 @@ import '../../core/theme/app_theme.dart';
 import '../../modules/catalogue.dart';
 import '../../modules/act_registry.dart';
 import '../../modules/engine/scenario.dart';
+import 'widgets/door_overlay.dart';
 import 'widgets/scenario_hud.dart';
 import 'widgets/session_gates.dart';
 
@@ -103,6 +104,17 @@ class _ArSessionScreenState extends State<ArSessionScreen>
   /// process" from "the camera or platform below it does", which is otherwise
   /// impossible to tell apart from a device with no debugger attached.
   bool _safeMode = false;
+
+  /// Draws the door detector's working over the live feed during the scan.
+  ///
+  /// Off by default: it is an instrument for whoever is tuning the detector,
+  /// not something a worker about to run a fire drill needs to read.
+  bool _showDetector = false;
+
+  /// Doors arrive at about ten a second while poses arrive at sixty, so the
+  /// overlay has to wake for both. Built once rather than per frame, so the
+  /// AnimatedBuilder is not resubscribing on every rebuild.
+  late final Listenable _scanRepaint = Listenable.merge([_frames, _environment]);
 
   /// Latest laid-out viewport, captured so [_pumpScenario] can construct a
   /// camera outside of build.
@@ -433,21 +445,51 @@ class _ArSessionScreenState extends State<ArSessionScreen>
                 onBegin: _calibrate,
                 onExit: () => Navigator.of(context).maybePop(),
               ),
+              if (_showDetector && !_safeMode)
+                AnimatedBuilder(
+                  animation: _scanRepaint,
+                  builder: (context, _) => DoorOverlay(
+                    camera: _cameraFor(viewport, _frames.pose),
+                    environment: _environment,
+                  ),
+                ),
               Positioned(
                 right: 12,
                 top: 12,
                 child: SafeArea(
-                  child: FilterChip(
-                    label: Text(_safeMode ? 'Safe mode: on' : 'Safe mode'),
-                    selected: _safeMode,
-                    avatar: Icon(
-                      _safeMode ? Icons.healing : Icons.bug_report_outlined,
-                      size: 18,
-                    ),
-                    onSelected: (value) {
-                      Diagnostics.instance.breadcrumb('ar.safeMode=$value');
-                      setState(() => _safeMode = value);
-                    },
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      FilterChip(
+                        label: Text(_safeMode ? 'Safe mode: on' : 'Safe mode'),
+                        selected: _safeMode,
+                        avatar: Icon(
+                          _safeMode ? Icons.healing : Icons.bug_report_outlined,
+                          size: 18,
+                        ),
+                        onSelected: (value) {
+                          Diagnostics.instance.breadcrumb('ar.safeMode=$value');
+                          setState(() => _safeMode = value);
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      // Safe mode draws the camera and nothing else, so there
+                      // is nothing for this to draw on top of.
+                      FilterChip(
+                        label: Text(
+                          _showDetector ? 'Detector: on' : 'Detector',
+                        ),
+                        selected: _showDetector,
+                        avatar: const Icon(Icons.sensor_window_outlined, size: 18),
+                        onSelected: _safeMode
+                            ? null
+                            : (value) {
+                                Diagnostics.instance
+                                    .breadcrumb('ar.doorOverlay=$value');
+                                setState(() => _showDetector = value);
+                              },
+                      ),
+                    ],
                   ),
                 ),
               ),
