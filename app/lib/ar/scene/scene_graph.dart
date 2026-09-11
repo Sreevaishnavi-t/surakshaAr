@@ -209,6 +209,4 @@ Vector3 scenePlacement({
   );
 }
 
-/// Typical eye height of a standing worker, in metres. Scene content uses this
-/// to sit things on the floor: the camera is the eye, so the floor is −1.6.
-const double kEyeHeightMetres = 1.6;
+

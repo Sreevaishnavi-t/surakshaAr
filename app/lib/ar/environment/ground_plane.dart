@@ -14,6 +14,12 @@ enum GroundHeightSource {
   /// Derived from the worker aiming at a floor point during calibration.
   measured,
 
+  /// Worked out from a height the worker told us, plus how they said they hold
+  /// the phone. Weaker than [measured], far better than [assumed]: a person
+  /// knows their own height to a couple of centimetres, and cannot judge a
+  /// metre and a half of floor by eye anywhere near as well.
+  stated,
+
   /// Taken from a detected marker of known physical size and mounting height.
   marker,
 }

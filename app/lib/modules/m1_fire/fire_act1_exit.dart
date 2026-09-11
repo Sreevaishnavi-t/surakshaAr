@@ -122,6 +122,11 @@ class FireAct1ExitScenario extends ArScenario {
   /// they are placed on other detected doorways where any exist.
   @override
   void applyEnvironment(EnvironmentMap map, ArCamera camera) {
+    // Floor first, and unconditionally. Anchoring to a doorway is a bonus that
+    // needs a decent scan; standing on the right floor is not, and returning
+    // early on a thin scan used to skip both.
+    super.applyEnvironment(map, camera);
+
     if (!map.isUsable) return;
 
     const resolver = PlacementResolver();
@@ -211,7 +216,7 @@ class FireAct1ExitScenario extends ArScenario {
     _lockedBearing = (-38 + jitter * 0.4) * mirror;
     _liftBearing = (96 + jitter * 0.5) * mirror;
 
-    const floor = -kEyeHeightMetres;
+    final floor = floorZ;
 
     _fire = FireNode(
       id: 'fire',

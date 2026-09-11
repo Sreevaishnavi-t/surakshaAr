@@ -182,7 +182,7 @@ class GasAct3BuddyScenario extends ArScenario {
   }
 
   void _build() {
-    const floor = -kEyeHeightMetres;
+    final floor = floorZ;
 
     // The tank opening the worker is standing at.
     _nodes.add(BillboardNode(

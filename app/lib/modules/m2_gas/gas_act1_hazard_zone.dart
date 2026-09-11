@@ -129,7 +129,7 @@ class GasAct1HazardZoneScenario extends ArScenario {
   _Phase get phase => _phase;
 
   void _build() {
-    const floor = -kEyeHeightMetres;
+    final floor = floorZ;
     final mirror = _random.nextBool() ? 1.0 : -1.0;
     final sourceBearing = (55 + (_random.nextDouble() - 0.5) * 50) * mirror;
 
@@ -177,7 +177,7 @@ class GasAct1HazardZoneScenario extends ArScenario {
 
   /// Four candidate approach directions, only one of them upwind and clear.
   void _buildApproachOptions(double sourceBearing, double mirror) {
-    const floor = -kEyeHeightMetres;
+    final floor = floorZ;
 
     // Upwind means facing into the wind: the wind blows towards _windBearing,
     // so the safe approach is from the opposite side.

@@ -97,7 +97,7 @@ class OrderingScenario extends ArScenario {
   int get totalSteps => _steps.length;
 
   void _build() {
-    const floor = -kEyeHeightMetres;
+    final floor = floorZ;
     for (var i = 0; i < _steps.length; i++) {
       _orderById[_steps[i].id] = i;
     }

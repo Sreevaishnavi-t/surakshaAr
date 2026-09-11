@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:vector_math/vector_math_64.dart' show Quaternion;
 
 import '../../ar/camera/ar_camera_view.dart';
+import '../../ar/environment/camera_height.dart';
 import '../../ar/fx/fire_fx.dart';
 import '../../ar/pose/device_pose.dart';
 import '../../ar/pose/pose_service.dart';
@@ -88,6 +89,14 @@ class _ArSessionScreenState extends State<ArSessionScreen>
 
   double _calibrationScale = 1.0;
 
+  /// What the worker told us about their stature and grip.
+  ///
+  /// Kept here rather than in the gate widget because it decides the ground
+  /// plane, and the ground plane is what the scanner, the door detector and the
+  /// gallery all measure against. One number, one owner.
+  double _bodyHeightMetres = CameraHeight.defaultBodyHeightMetres;
+  PhoneHold _hold = PhoneHold.atChestLevel;
+
   /// Draw the camera only, with no scene layer.
   ///
   /// A diagnostic bisect, not a feature: it separates "the renderer kills the
@@ -112,6 +121,15 @@ class _ArSessionScreenState extends State<ArSessionScreen>
     // AnimatedBuilder dirty *during* a build, which trips a framework assert in
     // debug and leaves the tree in an inconsistent state in release.
     _frames.addListener(_pumpScenario);
+    // Seed the ground plane from the defaults, so a worker who never touches
+    // the height control still gets a consistent floor rather than whatever the
+    // scanner happened to start with.
+    final seed = CameraHeight.forWorker(
+      bodyHeightMetres: _bodyHeightMetres,
+      hold: _hold,
+    );
+    _scanner.ground = seed;
+    _environment.ground = seed;
     _prepare();
   }
 
@@ -178,6 +196,27 @@ class _ArSessionScreenState extends State<ArSessionScreen>
 
   void _onCameraChanged() {
     if (mounted) setState(() {});
+  }
+
+  /// Applies the worker's stated height to everything that measures distance.
+  ///
+  /// Assigned in both places deliberately. The scanner carries the ground plane
+  /// it interprets each frame against, and the map carries the one everything
+  /// downstream reads; letting those two drift apart would have the door
+  /// detector measuring against one floor and the placement resolver against
+  /// another.
+  void _applyHeight(double bodyHeightMetres, PhoneHold hold) {
+    final ground = CameraHeight.forWorker(
+      bodyHeightMetres: bodyHeightMetres,
+      hold: hold,
+    );
+
+    setState(() {
+      _bodyHeightMetres = bodyHeightMetres;
+      _hold = hold;
+      _scanner.ground = ground;
+      _environment.ground = ground;
+    });
   }
 
   /// Pins the scenario's authoring "forward" to the worker's current heading.
@@ -388,6 +427,9 @@ class _ArSessionScreenState extends State<ArSessionScreen>
                 capabilities: _capabilities,
                 intrinsicsAreMeasured: _intrinsics.isMeasured,
                 environment: _environment,
+                bodyHeightMetres: _bodyHeightMetres,
+                hold: _hold,
+                onHeightChanged: _applyHeight,
                 onBegin: _calibrate,
                 onExit: () => Navigator.of(context).maybePop(),
               ),

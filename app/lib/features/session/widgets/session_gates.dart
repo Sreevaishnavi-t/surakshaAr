@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../ar/environment/camera_height.dart';
 import '../../../ar/environment/environment_map.dart';
 import '../../../ar/pose/pose_service.dart';
 import '../../../core/theme/app_theme.dart';
@@ -92,6 +93,9 @@ class SessionCalibrationGate extends StatelessWidget {
     required this.capabilities,
     required this.intrinsicsAreMeasured,
     required this.environment,
+    required this.bodyHeightMetres,
+    required this.hold,
+    required this.onHeightChanged,
     required this.onBegin,
     required this.onExit,
   });
@@ -102,6 +106,12 @@ class SessionCalibrationGate extends StatelessWidget {
   /// Live room map, so the sweep shows the worker what it is actually finding
   /// rather than an indeterminate spinner.
   final EnvironmentMap environment;
+
+  /// The worker's stated stature, and how they say they hold the phone.
+  final double bodyHeightMetres;
+  final PhoneHold hold;
+
+  final void Function(double bodyHeightMetres, PhoneHold hold) onHeightChanged;
 
   final VoidCallback onBegin;
   final VoidCallback onExit;
@@ -169,6 +179,12 @@ class SessionCalibrationGate extends StatelessWidget {
                   fontSize: 16,
                   height: 1.45,
                 ),
+              ),
+              const SizedBox(height: 18),
+              _HeightControl(
+                bodyHeightMetres: bodyHeightMetres,
+                hold: hold,
+                onChanged: onHeightChanged,
               ),
               const SizedBox(height: 18),
               _ScanProgress(coverage: coverage, doorsFound: doors.length),
@@ -350,6 +366,117 @@ class _ScanProgress extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+/// Asks how tall the worker is and how they hold the phone.
+///
+/// This looks like a small courtesy and is not. The camera's height above the
+/// floor is the only unknown in the ground plane — gravity fixes the other
+/// three numbers for free — so it sets the scale of everything the engine
+/// measures: where content stands, how far away the tunnel wall is, and how
+/// wide a detected doorway comes out in metres. Guessing it wrong by 20 cm
+/// pushes content through the floor and makes real doors measure out of range.
+class _HeightControl extends StatelessWidget {
+  const _HeightControl({
+    required this.bodyHeightMetres,
+    required this.hold,
+    required this.onChanged,
+  });
+
+  final double bodyHeightMetres;
+  final PhoneHold hold;
+  final void Function(double bodyHeightMetres, PhoneHold hold) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final ground = CameraHeight.forWorker(
+      bodyHeightMetres: bodyHeightMetres,
+      hold: hold,
+    );
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.straighten, size: 18, color: Colors.white70),
+              const SizedBox(width: 10),
+              const Text(
+                'Your height',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '${(bodyHeightMetres * 100).round()} cm',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          Slider(
+            value: bodyHeightMetres.clamp(
+              CameraHeight.minBodyHeightMetres,
+              CameraHeight.maxBodyHeightMetres,
+            ),
+            min: CameraHeight.minBodyHeightMetres,
+            max: CameraHeight.maxBodyHeightMetres,
+            // One notch per centimetre: finer than anyone can state their own
+            // height, and coarse enough to land on a round number.
+            divisions:
+                ((CameraHeight.maxBodyHeightMetres -
+                            CameraHeight.minBodyHeightMetres) *
+                        100)
+                    .round(),
+            onChanged: (value) => onChanged(value, hold),
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: SegmentedButton<PhoneHold>(
+                  showSelectedIcon: false,
+                  style: const ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  segments: const [
+                    ButtonSegment(
+                      value: PhoneHold.atEyeLevel,
+                      label: Text('Up at eye level'),
+                    ),
+                    ButtonSegment(
+                      value: PhoneHold.atChestLevel,
+                      label: Text('At chest'),
+                    ),
+                  ],
+                  selected: {hold},
+                  onSelectionChanged: (selection) =>
+                      onChanged(bodyHeightMetres, selection.first),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Camera about ${ground.cameraHeightMetres.toStringAsFixed(2)} m '
+            'above the floor.',
+            style: const TextStyle(color: Colors.white54, fontSize: 12.5),
+          ),
+        ],
+      ),
     );
   }
 }

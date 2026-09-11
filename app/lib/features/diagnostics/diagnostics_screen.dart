@@ -380,24 +380,35 @@ class _ExitCard extends StatelessWidget {
 /// and "our own native code took a fatal signal" decides where to look next,
 /// and the raw reason code says neither.
 ///
-/// TODO(human): implement this.
-///
-/// Return a short sentence for each case that matters:
-///   - exit.isLowMemory  -> the kernel reclaimed us; point at exit.memorySummary
-///                          and say the fix is to allocate less, not to catch
-///                          anything. Note that PSS above roughly 400 MB on a
-///                          mid-range handset is already the answer.
-///   - exit.isNativeCrash -> a fatal signal in native code. Say the tombstone
-///                          below names the faulting library, and that this
-///                          rules out every Dart-level explanation.
-///   - exit.isAnr        -> the main thread blocked past the watchdog. Point at
-///                          the trace for what it was blocked on.
-///   - exit.isBenign     -> the user closed it; nothing to investigate.
-///   - anything else     -> say plainly that it is not yet diagnosable and the
-///                          tombstone, if present, is the next thing to read.
-///
-/// Keep it to one or two sentences per case: this renders on a phone, and it is
-/// read by whoever is holding it rather than by someone with a debugger.
+/// Each case names the next thing to read, because a verdict that does not
+/// change what you do next is just a restatement of the reason code.
 String verdictFor(ProcessExit exit) {
-  return '';
+  if (exit.isBenign) {
+    return 'You closed the app. Nothing to investigate.';
+  }
+
+  if (exit.isLowMemory) {
+    // Android reclaimed the process. Catching something is not the fix and
+    // saying so saves whoever reads this from looking for an exception.
+    return 'Android reclaimed the app to free memory (${exit.memorySummary}). '
+        'Nothing threw — the fix is to use less memory, not to catch anything. '
+        'On a mid-range handset, PSS much above 400 MB is already the answer.';
+  }
+
+  if (exit.isNativeCrash) {
+    return 'A fatal signal in native code, below Dart. This rules out every '
+        '${exit.trace == null ? "Dart-level explanation." : "Dart-level "
+            "explanation — the tombstone below names the faulting library."}';
+  }
+
+  if (exit.isAnr) {
+    return 'The main thread stayed blocked past the Android watchdog, so the '
+        'system killed the app'
+        '${exit.trace == null ? "." : ". The trace below shows what it was "
+            "blocked on."}';
+  }
+
+  return 'Not diagnosable from the exit reason alone'
+      '${exit.trace == null ? "." : " — the trace below is the next thing to "
+          "read."}';
 }

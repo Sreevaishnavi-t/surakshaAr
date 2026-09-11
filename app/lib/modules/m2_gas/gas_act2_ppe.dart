@@ -194,7 +194,7 @@ class GasAct2PpeScenario extends ArScenario {
       .every((item) => _selected.contains(item.id));
 
   void _build() {
-    const floor = -kEyeHeightMetres;
+    final floor = floorZ;
     final shuffled = List<_Item>.from(_catalogue)..shuffle(_random);
 
     // Laid out as two rows in an arc, so the worker turns to see the whole

@@ -3,6 +3,7 @@ import 'dart:ui' show Offset;
 import 'package:flutter/foundation.dart';
 
 import '../../ar/environment/environment_map.dart';
+import '../../ar/environment/ground_plane.dart';
 import '../../ar/scene/ar_camera.dart';
 import '../../ar/scene/scene_graph.dart';
 import '../../core/theme/app_theme.dart';
@@ -128,6 +129,19 @@ abstract class ArScenario extends ChangeNotifier {
   /// Live scene contents. Implementations may mutate this list between frames.
   List<SceneNode> get nodes;
 
+  /// Scene-space Z of the floor: negative, because the camera is the origin and
+  /// the floor is below it.
+  ///
+  /// Starts at the assumed standing eye height and is corrected by
+  /// [snapToFloor] once the room has been measured. Scenarios must read this
+  /// rather than hardcode a height, so that one number governs the floor for
+  /// content, for the simulated gallery and for the door detector alike.
+  double _floorZ = -GroundPlane.assumed.cameraHeightMetres;
+
+  /// Where the floor currently is. Implementations place content against this.
+  @protected
+  double get floorZ => _floorZ;
+
   /// Current instruction.
   ScenarioPrompt get prompt;
 
@@ -174,9 +188,40 @@ abstract class ArScenario extends ChangeNotifier {
   /// onto actual open floor — rather than the authored bearings it was built
   /// with, which were only ever a fallback for a room nobody had looked at.
   ///
-  /// The default is to do nothing, so a scenario that has no spatial content,
-  /// or that is deliberately abstract, is unaffected.
-  void applyEnvironment(EnvironmentMap map, ArCamera camera) {}
+  /// The default is to put everything on the floor that was actually measured.
+  ///
+  /// That default is not a no-op, and deliberately so. Scenarios author their
+  /// content against an *assumed* floor, because they are built before the room
+  /// has been looked at. Leaving them there meant content sat at a height
+  /// nobody had checked — visibly floating, or sunk into the ground — in every
+  /// act that did not override this method, which until now was seven of the
+  /// eight.
+  ///
+  /// Overriding implementations should call `super.applyEnvironment` first and
+  /// then move individual nodes onto detected features, so they inherit the
+  /// floor correction rather than reimplementing it.
+  void applyEnvironment(EnvironmentMap map, ArCamera camera) {
+    snapToFloor(map.ground);
+  }
+
+  /// Shifts every node so the authored floor lands on the measured one.
+  ///
+  /// A single uniform delta rather than an absolute assignment, which is the
+  /// whole trick: it preserves each node's height *above* the floor. An
+  /// extinguisher bracketed 0.45 m up a wall and a smoke column starting 0.7 m
+  /// above a fire stay where the author put them relative to the ground, with
+  /// no per-node metadata to record and keep in sync.
+  @protected
+  void snapToFloor(GroundPlane ground) {
+    final measured = -ground.cameraHeightMetres;
+    final delta = measured - _floorZ;
+    if (delta.abs() < 1e-6) return;
+
+    for (final node in nodes) {
+      node.position.z += delta;
+    }
+    _floorZ = measured;
+  }
 
   /// Called when the worker abandons the act. Implementations should record it
   /// rather than silently discarding progress.

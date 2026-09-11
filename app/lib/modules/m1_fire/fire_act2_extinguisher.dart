@@ -142,7 +142,7 @@ class FireAct2ExtinguisherScenario extends ArScenario {
   void _build() {
     final mirror = _random.nextBool() ? 1.0 : -1.0;
     final bearing = (12 + (_random.nextDouble() - 0.5) * 20) * mirror;
-    const floor = -kEyeHeightMetres;
+    final floor = floorZ;
 
     _basePosition = scenePlacement(
       bearingDegrees: bearing,
@@ -194,7 +194,7 @@ class FireAct2ExtinguisherScenario extends ArScenario {
       (id: 'ext.metal', icon: Icons.grain, colour: const Color(0xFF1565C0), label: 'Class D'),
     ]..shuffle(_random);
 
-    const floor = -kEyeHeightMetres + 0.45;
+    final floor = floorZ + 0.45;
     for (var i = 0; i < options.length; i++) {
       final option = options[i];
       final bearing = (-42.0 + i * 28.0) * mirror;

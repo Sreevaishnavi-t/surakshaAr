@@ -151,7 +151,7 @@ class FireAct3EvacuationScenario extends ArScenario {
   List<SceneNode> get nodes => _nodes;
 
   void _build() {
-    const floor = -kEyeHeightMetres;
+    final floor = floorZ;
     final mirror = _random.nextBool() ? 1.0 : -1.0;
 
     _fire = FireNode(
