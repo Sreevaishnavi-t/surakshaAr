@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../assessment/assessment_engine.dart';
@@ -28,8 +30,27 @@ class AssessmentScreen extends StatefulWidget {
   State<AssessmentScreen> createState() => _AssessmentScreenState();
 }
 
+/// One question as it is currently on screen.
+///
+/// The screen holds this rather than reading the engine during build, and that
+/// is the whole point of it. `AssessmentEngine.submit` deliberately clears the
+/// presented question — that is what makes answering twice impossible — so from
+/// the moment the worker taps "Check answer" the engine has nothing to show.
+/// The view still needs the question, the choice order and the answer key to
+/// draw the explanation over it, so it keeps its own copy.
+typedef _Presented = ({
+  Question question,
+  List<String> choices,
+  List<int> order,
+  int number,
+});
+
 class _AssessmentScreenState extends State<AssessmentScreen> {
   late final AssessmentEngine _engine;
+
+  /// What is currently drawn. Null only if the bank could not supply a single
+  /// item, which is a defect rather than a loading state.
+  _Presented? _presented;
 
   /// Indices into the *presented* choice order.
   final Set<int> _selected = {};
@@ -49,8 +70,31 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       bank: QuestionBank.forDomain(widget.domain),
       itemCount: widget.itemCount,
     );
-    _engine.advance();
+    if (_engine.advance()) _capture();
   }
+
+  /// Takes a copy of the engine's presented item, to survive [_submit].
+  void _capture() {
+    final current = _engine.current;
+    if (current == null) return;
+    _presented = (
+      question: current.question,
+      choices: current.choices,
+      order: current.order,
+      // Frozen at presentation time: submitting increments the engine's asked
+      // count, which would otherwise make the counter skip ahead to the next
+      // question while the worker is still reading this one's explanation.
+      number: _engine.askedCount + 1,
+    );
+  }
+
+  /// Items this attempt will actually ask.
+  ///
+  /// The lighter domains carry fewer questions than the default eight, and
+  /// counting toward a total the bank cannot reach tells the worker the quiz
+  /// ended early when it did no such thing.
+  int get _itemTotal =>
+      math.min(widget.itemCount, QuestionBank.forDomain(widget.domain).length);
 
   void _toggle(int presentedIndex, QuestionKind kind) {
     if (_showingExplanation) return;
@@ -90,6 +134,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     _engine.submit(given);
 
     setState(() {
+      // _presented already holds this question; the engine no longer does.
       _lastAnswerCorrect = _engine.answers.last.correct;
       _showingExplanation = true;
     });
@@ -101,7 +146,10 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       _sequence.clear();
       _showingExplanation = false;
 
-      if (!_engine.advance()) {
+      if (_engine.advance()) {
+        _capture();
+      } else {
+        _presented = null;
         _result = _engine.finish();
       }
     });
@@ -119,7 +167,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
             ? PreferredSize(
                 preferredSize: const Size.fromHeight(4),
                 child: LinearProgressIndicator(
-                  value: _engine.askedCount / widget.itemCount,
+                  value: _engine.askedCount / _itemTotal,
                   minHeight: 4,
                 ),
               )
@@ -132,9 +180,13 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   }
 
   Widget _buildQuestion() {
-    final current = _engine.current;
+    final current = _presented;
     if (current == null) {
-      return const Center(child: CircularProgressIndicator());
+      // Nothing here is asynchronous, so a spinner would be a lie: it promised
+      // content that was never coming and left the quiz apparently hung. If we
+      // have no question, the bank failed to supply one and the worker needs to
+      // be told, not watched over by an animation.
+      return _NoQuestions(onBack: () => Navigator.of(context).maybePop());
     }
 
     final question = current.question;
@@ -151,7 +203,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
                 Row(
                   children: [
                     Text(
-                      'Question ${_engine.askedCount + 1} of ${widget.itemCount}',
+                      'Question ${current.number} of $_itemTotal',
                       style: theme.textTheme.labelLarge?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
@@ -555,6 +607,56 @@ class _ResultView extends StatelessWidget {
             child: FilledButton(onPressed: onDone, child: const Text('Done')),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Shown when the question bank could not supply an item.
+///
+/// Deliberately not a spinner. This screen loads nothing asynchronously, so an
+/// indeterminate progress indicator here can only ever mean "waiting for
+/// something that will never arrive" — which is precisely how this failed
+/// before: the quiz appeared to hang indefinitely on a perfectly responsive
+/// app.
+class _NoQuestions extends StatelessWidget {
+  const _NoQuestions({required this.onBack});
+
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.quiz_outlined,
+              size: 44,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No questions available',
+              style: theme.textTheme.titleMedium,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'This module has no assessment items installed. Report this to '
+              'your safety officer — the drill can still be taken.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            FilledButton(onPressed: onBack, child: const Text('Go back')),
+          ],
+        ),
       ),
     );
   }
